@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import Modal from './Modal';
 
-// Create or edit a student on a given bus. Coordinates are optional at creation
-// (a dot in the roster shows whether they've been set), but needed before the
-// parent app can draw that child's route.
+const PHOTO_BUCKET = 'student-photos';
+
+// Create or edit a student on a given bus. Photo is optional. Coordinates are
+// optional at creation but needed before the parent app can draw the route.
 export default function StudentFormModal({ busId, schoolId, student, onClose, onSaved }) {
   const isEdit = Boolean(student);
   const [fullName, setFullName] = useState(student?.full_name || '');
@@ -16,10 +17,52 @@ export default function StudentFormModal({ busId, schoolId, student, onClose, on
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
+  // Photo state: existing path (edit), a newly chosen file, and a preview URL.
+  const [existingPhotoPath, setExistingPhotoPath] = useState(student?.photo_path || null);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [removePhoto, setRemovePhoto] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // For an existing photo, fetch a short-lived signed URL to preview it.
+  useEffect(() => {
+    let active = true;
+    if (existingPhotoPath && !photoFile && !removePhoto) {
+      supabase.storage.from(PHOTO_BUCKET).createSignedUrl(existingPhotoPath, 600).then(({ data }) => {
+        if (active && data?.signedUrl) setPhotoPreview(data.signedUrl);
+      });
+    }
+    return () => { active = false; };
+  }, [existingPhotoPath, photoFile, removePhoto]);
+
   function numOrNull(v) {
     if (v === '' || v === null || v === undefined) return null;
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
+  }
+
+  function onPickFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image is too large. Please use one under 5 MB.');
+      return;
+    }
+    setError(null);
+    setPhotoFile(file);
+    setRemovePhoto(false);
+    setPhotoPreview(URL.createObjectURL(file));
+  }
+
+  function clearPhoto() {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    setRemovePhoto(true);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
   async function handleSubmit(e) {
@@ -27,38 +70,80 @@ export default function StudentFormModal({ busId, schoolId, student, onClose, on
     setSaving(true);
     setError(null);
 
-    const payload = {
-      full_name: fullName.trim(),
-      admission_number: admissionNumber.trim(),
-      pickup_lat: numOrNull(pickupLat),
-      pickup_lng: numOrNull(pickupLng),
-      drop_lat: numOrNull(dropLat),
-      drop_lng: numOrNull(dropLng),
-      bus_id: busId,
-    };
+    try {
+      let photoPath = existingPhotoPath;
 
-    let err;
-    if (isEdit) {
-      ({ error: err } = await supabase.from('students').update(payload).eq('id', student.id));
-    } else {
-      ({ error: err } = await supabase.from('students').insert({ ...payload, school_id: schoolId }));
-    }
+      // Upload a newly chosen photo first, so we can store its path on the row.
+      if (photoFile) {
+        const ext = (photoFile.name.split('.').pop() || 'jpg').toLowerCase();
+        const safeAdm = admissionNumber.trim().replace(/[^a-zA-Z0-9_-]/g, '_') || 'student';
+        const path = `${schoolId}/${safeAdm}_${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from(PHOTO_BUCKET)
+          .upload(path, photoFile, { upsert: true, contentType: photoFile.type });
+        if (upErr) throw new Error(`Photo upload failed: ${upErr.message}`);
+        photoPath = path;
+      } else if (removePhoto) {
+        photoPath = null;
+      }
 
-    if (err) {
-      // Friendlier message for the common duplicate-admission-number case.
-      setError(err.code === '23505'
-        ? 'A student with this admission number already exists in your school.'
-        : err.message);
-      setSaving(false);
-    } else {
+      const payload = {
+        full_name: fullName.trim(),
+        admission_number: admissionNumber.trim(),
+        pickup_lat: numOrNull(pickupLat),
+        pickup_lng: numOrNull(pickupLng),
+        drop_lat: numOrNull(dropLat),
+        drop_lng: numOrNull(dropLng),
+        photo_path: photoPath,
+        bus_id: busId,
+      };
+
+      let err;
+      if (isEdit) {
+        ({ error: err } = await supabase.from('students').update(payload).eq('id', student.id));
+      } else {
+        ({ error: err } = await supabase.from('students').insert({ ...payload, school_id: schoolId }));
+      }
+      if (err) {
+        throw new Error(err.code === '23505'
+          ? 'A student with this admission number already exists in your school.'
+          : err.message);
+      }
       onSaved();
+    } catch (ex) {
+      setError(ex.message);
+      setSaving(false);
     }
   }
+
+  const initial = (fullName.trim()[0] || '?').toUpperCase();
 
   return (
     <Modal title={isEdit ? `Edit ${student.full_name}` : 'Add student'} onClose={onClose} width={560}>
       <form onSubmit={handleSubmit}>
         {error && <div className="form-error">{error}</div>}
+
+        <div className="photo-field">
+          <div className="photo-preview">
+            {photoPreview
+              ? <img src={photoPreview} alt="Student" />
+              : <span className="photo-initial">{initial}</span>}
+          </div>
+          <div className="photo-actions">
+            <div className="photo-label">Profile photo <span className="muted">(optional)</span></div>
+            <div className="photo-buttons">
+              <button type="button" className="btn btn-secondary btn-sm"
+                onClick={() => fileInputRef.current?.click()}>
+                {photoPreview ? 'Change photo' : 'Upload photo'}
+              </button>
+              {photoPreview && (
+                <button type="button" className="btn btn-danger btn-sm" onClick={clearPhoto}>Remove</button>
+              )}
+            </div>
+            <input ref={fileInputRef} type="file" accept="image/*"
+              style={{ display: 'none' }} onChange={onPickFile} />
+          </div>
+        </div>
 
         <div className="form-row">
           <div className="form-field">

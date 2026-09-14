@@ -23,6 +23,7 @@ function todayStr() {
 export default function BusDetail({ busId, onBack }) {
   const [bus, setBus] = useState(null);
   const [students, setStudents] = useState([]);
+  const [photoUrls, setPhotoUrls] = useState({}); // student_id -> signed photo url
   const [presentCount, setPresentCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -49,10 +50,24 @@ export default function BusDetail({ busId, onBack }) {
 
     const { data: studentData, error: stuErr } = await supabase
       .from('students')
-      .select('id, full_name, admission_number, pickup_lat, pickup_lng, drop_lat, drop_lng')
+      .select('id, full_name, admission_number, pickup_lat, pickup_lng, drop_lat, drop_lng, photo_path')
       .eq('bus_id', busId)
       .order('full_name');
     if (stuErr) { setError(stuErr.message); setLoading(false); return; }
+
+    // Fetch short-lived signed URLs for any students that have a photo.
+    const withPhotos = (studentData || []).filter((s) => s.photo_path);
+    let signedMap = {};
+    if (withPhotos.length > 0) {
+      const { data: signed } = await supabase.storage
+        .from('student-photos')
+        .createSignedUrls(withPhotos.map((s) => s.photo_path), 3600);
+      if (signed) {
+        withPhotos.forEach((s, i) => {
+          if (signed[i]?.signedUrl) signedMap[s.id] = signed[i].signedUrl;
+        });
+      }
+    }
 
     // Attendance count for today (present = true rows in attendance table).
     const { count, error: attErr } = await supabase
@@ -65,6 +80,7 @@ export default function BusDetail({ busId, onBack }) {
 
     setBus(busData);
     setStudents(studentData || []);
+    setPhotoUrls(signedMap);
     setPresentCount(count || 0);
     setLoading(false);
   }, [busId]);
@@ -158,7 +174,14 @@ export default function BusDetail({ busId, onBack }) {
           </div>
           {students.map((s) => (
             <div className="roster-row" key={s.id}>
-              <span className="roster-name">{s.full_name}</span>
+              <span className="roster-name-cell">
+                <span className="roster-avatar">
+                  {photoUrls[s.id]
+                    ? <img src={photoUrls[s.id]} alt={s.full_name} />
+                    : <span className="roster-avatar-initial">{(s.full_name[0] || '?').toUpperCase()}</span>}
+                </span>
+                <span className="roster-name">{s.full_name}</span>
+              </span>
               <span className="muted">{s.admission_number}</span>
               <span>{s.pickup_lat != null ? <Dot ok /> : <Dot />}</span>
               <span>{s.drop_lat != null ? <Dot ok /> : <Dot />}</span>

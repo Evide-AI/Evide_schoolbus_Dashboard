@@ -117,3 +117,40 @@ textarea:focus {
 
 /* --- button icons align --- */
 .btn svg { display: block; }
+
+/* --- Student photo field --- */
+.photo-field {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  margin-bottom: 1.1rem;
+}
+.photo-preview {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #eaf1fe;
+  display: grid; place-items: center;
+}
+.photo-preview img { width: 100%; height: 100%; object-fit: cover; }
+.photo-initial { font-size: 1.5rem; font-weight: 650; color: var(--accent); }
+.photo-actions { flex: 1; }
+.photo-label { font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); margin-bottom: 0.5rem; }
+.photo-buttons { display: flex; gap: 0.5rem; }
+
+/* --- Roster avatar --- */
+.roster-avatar {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #eaf1fe;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.roster-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.roster-avatar-initial { font-size: 0.9rem; font-weight: 650; color: var(--accent); }
+.roster-name-cell { display: flex; align-items: center; gap: 0.7rem; }
