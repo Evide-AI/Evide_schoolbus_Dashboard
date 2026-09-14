@@ -62,3 +62,58 @@ textarea:focus {
 
 .notify-intro { font-size: 0.88rem; margin-bottom: 1.2rem; }
 .notify-sent { font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.5rem; }
+
+/* --- Confirm dialog --- */
+.confirm-body { display: flex; gap: 1rem; align-items: flex-start; margin-bottom: 0.5rem; }
+.confirm-icon {
+  flex-shrink: 0;
+  width: 44px; height: 44px;
+  border-radius: 11px;
+  display: grid; place-items: center;
+}
+.confirm-icon-danger { background: var(--stop-soft); color: var(--stop); }
+.confirm-icon-default { background: var(--signal-soft); color: #9a6b00; }
+.confirm-message { font-size: 0.95rem; line-height: 1.55; color: var(--ink-soft); padding-top: 0.2rem; }
+.confirm-actions { margin-top: 1.4rem; }
+.confirm-extra {
+  width: 100%;
+  margin-top: 0.4rem;
+  background: var(--accent-soft, #eaf1fe);
+  color: var(--accent);
+  border: 1px solid rgba(13, 109, 237, 0.28);
+  font-weight: 600;
+}
+.confirm-extra:hover { background: #dfeafe; border-color: var(--accent); }
+
+.btn-danger-solid { background: var(--stop); color: #fff; }
+.btn-danger-solid:hover { background: #a5321f; }
+.btn-danger-solid:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* --- Migrate students --- */
+.migrate-list-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 1.1rem 0 0.5rem; font-size: 0.82rem;
+}
+.linklike {
+  color: var(--accent); font-weight: 600; font-size: 0.82rem;
+  background: none; padding: 0;
+}
+.linklike:hover { text-decoration: underline; }
+.migrate-list {
+  max-height: 280px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.migrate-row {
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer; font-size: 0.9rem;
+  margin: 0;
+}
+.migrate-row:last-child { border-bottom: none; }
+.migrate-row:hover { background: var(--paper); }
+.migrate-row input { width: auto; }
+.migrate-name { font-weight: 550; flex: 1; }
+
+/* --- button icons align --- */
+.btn svg { display: block; }

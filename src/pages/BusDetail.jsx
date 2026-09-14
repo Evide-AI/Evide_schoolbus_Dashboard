@@ -4,6 +4,8 @@ import BusFormModal from '../components/BusFormModal';
 import StudentFormModal from '../components/StudentFormModal';
 import BulkUploadModal from '../components/BulkUploadModal';
 import NotifyModal from '../components/NotifyModal';
+import ConfirmDialog from '../components/ConfirmDialog';
+import MigrateStudentsModal from '../components/MigrateStudentsModal';
 import './BusDetail.css';
 
 const STATUS_LABEL = {
@@ -30,6 +32,9 @@ export default function BusDetail({ busId, onBack }) {
   const [editStudent, setEditStudent] = useState(null);
   const [bulk, setBulk] = useState(false);
   const [notify, setNotify] = useState(false);
+  const [confirmDeleteStudent, setConfirmDeleteStudent] = useState(null); // student obj
+  const [confirmDeleteBus, setConfirmDeleteBus] = useState(false);
+  const [migrate, setMigrate] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,23 +71,14 @@ export default function BusDetail({ busId, onBack }) {
 
   useEffect(() => { load(); }, [load]);
 
-  async function deleteStudent(id) {
-    if (!confirm('Remove this student from the roster? This cannot be undone.')) return;
+  async function doDeleteStudent(id) {
     const { error: delErr } = await supabase.from('students').delete().eq('id', id);
     if (delErr) { alert(delErr.message); return; }
+    setConfirmDeleteStudent(null);
     load();
   }
 
-  async function deleteBus() {
-    // Block deletion while students are still assigned — protects real data.
-    if (students.length > 0) {
-      alert(
-        `This bus still has ${students.length} student${students.length === 1 ? '' : 's'} assigned. ` +
-        'Move or remove them first, then delete the bus.'
-      );
-      return;
-    }
-    if (!confirm(`Delete ${bus.bus_number}? This cannot be undone.`)) return;
+  async function doDeleteBus() {
     const { error: delErr } = await supabase.from('buses').delete().eq('id', bus.id);
     if (delErr) { alert(delErr.message); return; }
     onBack();
@@ -106,9 +102,20 @@ export default function BusDetail({ busId, onBack }) {
           <span className={`pill pill-${bus.status}`}>{STATUS_LABEL[bus.status]}</span>
         </div>
         <div className="detail-head-actions">
-          <button className="btn btn-secondary" onClick={() => setNotify(true)}>Send notification</button>
-          <button className="btn btn-secondary" onClick={() => setEditBus(true)}>Edit bus</button>
-          <button className="btn btn-danger" onClick={deleteBus}>Delete bus</button>
+          <button className="btn btn-secondary" onClick={() => setNotify(true)}>
+            <BellIcon /> Send notification
+          </button>
+          {students.length > 0 && (
+            <button className="btn btn-secondary" onClick={() => setMigrate(true)}>
+              <MoveIcon /> Move students
+            </button>
+          )}
+          <button className="btn btn-secondary" onClick={() => setEditBus(true)}>
+            <EditIcon /> Edit bus
+          </button>
+          <button className="btn btn-danger" onClick={() => setConfirmDeleteBus(true)}>
+            <TrashIcon /> Delete bus
+          </button>
         </div>
       </header>
 
@@ -157,7 +164,7 @@ export default function BusDetail({ busId, onBack }) {
               <span>{s.drop_lat != null ? <Dot ok /> : <Dot />}</span>
               <span className="roster-row-actions">
                 <button className="btn btn-secondary btn-sm" onClick={() => setEditStudent(s)}>Edit</button>
-                <button className="btn btn-danger btn-sm" onClick={() => deleteStudent(s.id)}>Remove</button>
+                <button className="btn btn-danger btn-sm" onClick={() => setConfirmDeleteStudent(s)}>Remove</button>
               </span>
             </div>
           ))}
@@ -184,10 +191,85 @@ export default function BusDetail({ busId, onBack }) {
         <NotifyModal busId={busId} busNumber={bus.bus_number} schoolId={bus.school_id}
           onClose={() => setNotify(false)} />
       )}
+
+      {confirmDeleteStudent && (
+        <ConfirmDialog
+          title="Remove student"
+          message={`Remove ${confirmDeleteStudent.full_name} from the roster? This cannot be undone.`}
+          confirmLabel="Remove student"
+          tone="danger"
+          onConfirm={() => doDeleteStudent(confirmDeleteStudent.id)}
+          onCancel={() => setConfirmDeleteStudent(null)}
+        />
+      )}
+
+      {confirmDeleteBus && (
+        students.length > 0 ? (
+          <ConfirmDialog
+            title="Can't delete this bus yet"
+            message={`${bus.bus_number} still has ${students.length} student${students.length === 1 ? '' : 's'} assigned. Move them to another bus first, then you can delete it.`}
+            confirmLabel="Delete bus"
+            tone="danger"
+            confirmDisabled
+            extraAction={{
+              label: `Move ${students.length} student${students.length === 1 ? '' : 's'} to another bus`,
+              onClick: () => { setConfirmDeleteBus(false); setMigrate(true); },
+            }}
+            onCancel={() => setConfirmDeleteBus(false)}
+          />
+        ) : (
+          <ConfirmDialog
+            title="Delete bus"
+            message={`Delete ${bus.bus_number}? This cannot be undone.`}
+            confirmLabel="Delete bus"
+            tone="danger"
+            onConfirm={doDeleteBus}
+            onCancel={() => setConfirmDeleteBus(false)}
+          />
+        )
+      )}
+
+      {migrate && (
+        <MigrateStudentsModal
+          fromBus={bus}
+          schoolId={bus.school_id}
+          onClose={() => setMigrate(false)}
+          onDone={(count) => { setMigrate(false); load(); }}
+        />
+      )}
     </div>
   );
 }
 
 function Dot({ ok }) {
   return <span className={`set-dot ${ok ? 'set-dot-ok' : ''}`} title={ok ? 'Set' : 'Not set'} />;
+}
+
+function BellIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" />
+    </svg>
+  );
+}
+function MoveIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <path d="M5 9l-3 3 3 3M2 12h13M19 15l3-3-3-3M22 12H9" />
+    </svg>
+  );
+}
+function EditIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.1 2.1 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  );
+}
+function TrashIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" />
+    </svg>
+  );
 }
