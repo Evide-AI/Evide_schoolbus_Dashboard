@@ -6,6 +6,7 @@ import BulkUploadModal from '../components/BulkUploadModal';
 import NotifyModal from '../components/NotifyModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import MigrateStudentsModal from '../components/MigrateStudentsModal';
+import AssignStudentsModal from '../components/AssignStudentsModal';
 import './BusDetail.css';
 
 const STATUS_LABEL = {
@@ -36,6 +37,7 @@ export default function BusDetail({ busId, onBack }) {
   const [confirmDeleteStudent, setConfirmDeleteStudent] = useState(null); // student obj
   const [confirmDeleteBus, setConfirmDeleteBus] = useState(false);
   const [migrate, setMigrate] = useState(false);
+  const [assign, setAssign] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,6 +156,7 @@ export default function BusDetail({ busId, onBack }) {
         <h2>Roster</h2>
         <div className="roster-actions">
           <button className="btn btn-secondary btn-sm" onClick={() => setBulk(true)}>Upload spreadsheet</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setAssign(true)}>Assign existing</button>
           <button className="btn btn-primary btn-sm" onClick={() => setAddStudent(true)}>+ Add student</button>
         </div>
       </div>
@@ -258,6 +261,15 @@ export default function BusDetail({ busId, onBack }) {
           schoolId={bus.school_id}
           onClose={() => setMigrate(false)}
           onDone={(count) => { setMigrate(false); load(); }}
+        />
+      )}
+
+      {assign && (
+        <AssignStudentsModal
+          bus={bus}
+          schoolId={bus.school_id}
+          onClose={() => setAssign(false)}
+          onDone={(count) => { setAssign(false); load(); }}
         />
       )}
     </div>

@@ -1,7 +1,7 @@
 import { useAuth } from '../lib/AuthContext';
 import './Layout.css';
 
-export default function Layout({ children }) {
+export default function Layout({ current, onNavigate, children }) {
   const { managementUser, signOut } = useAuth();
   const school = managementUser?.schools;
 
@@ -13,9 +13,18 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="sidebar-nav">
-          <div className="sidebar-nav-item active">
+          <button
+            className={`sidebar-nav-item ${current === 'fleet' ? 'active' : ''}`}
+            onClick={() => onNavigate('fleet')}
+          >
             <BusIcon /> Fleet &amp; students
-          </div>
+          </button>
+          <button
+            className={`sidebar-nav-item ${current === 'students' ? 'active' : ''}`}
+            onClick={() => onNavigate('students')}
+          >
+            <UsersIcon /> Students
+          </button>
         </nav>
 
         <div className="sidebar-foot">
@@ -39,6 +48,14 @@ function BusIcon() {
       <path d="M3 11h18" />
       <circle cx="8" cy="18" r="1.4" fill="currentColor" stroke="none" />
       <circle cx="16" cy="18" r="1.4" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function UsersIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
     </svg>
   );
 }

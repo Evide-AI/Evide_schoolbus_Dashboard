@@ -4,17 +4,29 @@ import Login from './pages/Login';
 import Layout from './components/Layout';
 import BusList from './pages/BusList';
 import BusDetail from './pages/BusDetail';
+import StudentsPage from './pages/StudentsPage';
 
-// Simple in-app view state (list <-> detail). A single-screen MVP doesn't need
-// a full router; this keeps it lightweight and avoids URL/auth edge cases.
 function Dashboard() {
+  const [page, setPage] = useState('fleet');   // 'fleet' | 'students'
   const [openBusId, setOpenBusId] = useState(null);
 
+  function navigate(target) {
+    setOpenBusId(null); // leaving a bus detail when switching sections
+    setPage(target);
+  }
+
+  let body;
+  if (page === 'students') {
+    body = <StudentsPage />;
+  } else if (openBusId) {
+    body = <BusDetail busId={openBusId} onBack={() => setOpenBusId(null)} />;
+  } else {
+    body = <BusList onOpenBus={setOpenBusId} />;
+  }
+
   return (
-    <Layout>
-      {openBusId
-        ? <BusDetail busId={openBusId} onBack={() => setOpenBusId(null)} />
-        : <BusList onOpenBus={setOpenBusId} />}
+    <Layout current={page} onNavigate={navigate}>
+      {body}
     </Layout>
   );
 }
@@ -22,13 +34,8 @@ function Dashboard() {
 function Gate() {
   const { session, managementUser, loading, profileError, signOut } = useAuth();
 
-  if (loading) {
-    return <div className="app-loading">Loading…</div>;
-  }
-
+  if (loading) return <div className="app-loading">Loading…</div>;
   if (!session) return <Login />;
-
-  // Signed in, but not linked to a management_users row (or a load error).
   if (!managementUser) {
     return (
       <div className="app-loading app-loading-error">
@@ -37,7 +44,6 @@ function Gate() {
       </div>
     );
   }
-
   return <Dashboard />;
 }
 

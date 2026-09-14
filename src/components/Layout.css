@@ -26,15 +26,20 @@
   padding: 8px 12px;
   border-radius: 9px;
 }
-.sidebar-nav { flex: 1; }
+.sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 0.25rem; }
 .sidebar-nav-item {
   display: flex; align-items: center; gap: 0.6rem;
   padding: 0.6rem 0.7rem;
   border-radius: var(--radius-sm);
   font-size: 0.9rem; font-weight: 550;
   color: rgba(255,255,255,0.72);
+  width: 100%;
+  text-align: left;
+  background: none;
+  transition: background 0.12s ease, color 0.12s ease;
 }
-.sidebar-nav-item.active { background: rgba(255,255,255,0.1); color: #fff; }
+.sidebar-nav-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+.sidebar-nav-item.active { background: rgba(255,255,255,0.12); color: #fff; }
 
 .sidebar-foot { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem; }
 .sidebar-school { font-size: 0.92rem; font-weight: 600; }
