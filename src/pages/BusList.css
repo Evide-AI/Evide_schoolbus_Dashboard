@@ -1,0 +1,46 @@
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.8rem;
+}
+.page-head h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+.page-head p { font-size: 0.92rem; }
+
+.page-error {
+  background: var(--stop-soft);
+  color: var(--stop);
+  border: 1px solid rgba(192,57,43,0.25);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.88rem;
+  margin-bottom: 1.2rem;
+}
+
+.loading-row { padding: 2rem 0; }
+
+.empty-state { padding: 3rem 2rem; text-align: center; }
+.empty-state h3 { margin-bottom: 0.4rem; }
+.empty-state p { margin-bottom: 1.2rem; }
+
+.bus-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+}
+.bus-card {
+  text-align: left;
+  padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  transition: border-color 0.12s ease, transform 0.08s ease;
+}
+.bus-card:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.bus-card-top { display: flex; align-items: center; justify-content: space-between; }
+.bus-number { font-size: 1.15rem; font-weight: 650; }
+.bus-card-stats { display: flex; gap: 1.8rem; }
+.bus-card-stats > div { display: flex; flex-direction: column; }
+.stat-num { font-size: 1.35rem; font-weight: 650; line-height: 1; }
+.stat-label { font-size: 0.76rem; margin-top: 0.25rem; }

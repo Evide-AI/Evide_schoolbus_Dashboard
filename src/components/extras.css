@@ -1,0 +1,64 @@
+textarea {
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  width: 100%;
+  resize: vertical;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(47, 92, 224, 0.12);
+}
+
+.coord-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.9rem 1rem 0.2rem;
+  margin-bottom: 1.1rem;
+}
+.coord-group-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-bottom: 0.7rem;
+}
+
+.bulk-intro { font-size: 0.9rem; line-height: 1.5; margin-bottom: 1.2rem; }
+.bulk-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius);
+  padding: 2rem;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.bulk-drop:hover { border-color: var(--accent); background: rgba(47, 92, 224, 0.03); }
+.bulk-drop-icon { font-size: 1.6rem; color: var(--ink-faint); }
+.bulk-drop-text { font-size: 0.95rem; }
+.bulk-drop-hint { font-size: 0.8rem; }
+
+.bulk-columns { margin: 1.2rem 0 0.5rem; }
+.bulk-columns-label { font-size: 0.78rem; font-weight: 600; margin-bottom: 0.4rem; }
+.bulk-columns code {
+  display: block;
+  font-size: 0.8rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.7rem;
+  color: var(--ink-soft);
+  word-break: break-word;
+}
+
+.notify-intro { font-size: 0.88rem; margin-bottom: 1.2rem; }
+.notify-sent { font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.5rem; }

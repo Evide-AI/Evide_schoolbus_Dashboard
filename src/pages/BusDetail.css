@@ -1,0 +1,68 @@
+.back-btn { margin-bottom: 1.4rem; }
+
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.6rem;
+}
+.detail-head-main { display: flex; align-items: center; gap: 0.8rem; }
+.detail-head-main h1 { font-size: 1.6rem; }
+.detail-head-actions { display: flex; gap: 0.6rem; }
+
+.detail-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.detail-stat { padding: 1.2rem 1.3rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.detail-stat .stat-num { font-size: 1.8rem; font-weight: 650; line-height: 1; }
+.stat-of { font-size: 1.1rem; color: var(--ink-faint); font-weight: 550; }
+.detail-stat .stat-label { font-size: 0.82rem; }
+
+.roster-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.roster-head h2 { font-size: 1.15rem; }
+.roster-actions { display: flex; gap: 0.6rem; }
+
+.roster-table { overflow: hidden; }
+.roster-row {
+  display: grid;
+  grid-template-columns: 2fr 1.3fr 0.8fr 0.8fr auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1.2rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+.roster-row:last-child { border-bottom: none; }
+.roster-row-head {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink-faint);
+  background: var(--paper);
+}
+.roster-name { font-weight: 550; }
+.roster-row-actions { display: flex; gap: 0.4rem; justify-content: flex-end; }
+
+.set-dot {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.set-dot-ok { background: var(--go); }
+
+@media (max-width: 720px) {
+  .detail-stats { grid-template-columns: 1fr; }
+  .roster-row { grid-template-columns: 1fr auto; }
+  .roster-row span:nth-child(2),
+  .roster-row span:nth-child(3),
+  .roster-row span:nth-child(4) { display: none; }
+}

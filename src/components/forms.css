@@ -1,0 +1,18 @@
+.form-field { margin-bottom: 1.1rem; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.7rem;
+  margin-top: 1.6rem;
+}
+.form-error {
+  background: var(--stop-soft);
+  color: var(--stop);
+  border: 1px solid rgba(192,57,43,0.25);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+  font-size: 0.86rem;
+  margin-bottom: 1.2rem;
+}
+.form-hint { font-size: 0.82rem; margin-top: 0.35rem; }
