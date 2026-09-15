@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { regenerateBusRoute } from '../lib/api';
 import Modal from './Modal';
 
 const PHOTO_BUCKET = 'student-photos';
@@ -109,6 +110,14 @@ export default function StudentFormModal({ busId, schoolId, student, onClose, on
           ? 'A student with this admission number already exists in your school.'
           : err.message);
       }
+
+      // Ask the backend to (re)generate this bus's route now that the roster
+      // changed. Best-effort — if the backend is offline (outside 6am-7pm), the
+      // save still succeeds; the route regenerates next time.
+      if (busId) {
+        regenerateBusRoute(busId); // fire-and-forget, don't block the UI
+      }
+
       onSaved();
     } catch (ex) {
       setError(ex.message);
