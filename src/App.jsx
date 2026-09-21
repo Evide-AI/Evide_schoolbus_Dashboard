@@ -6,6 +6,7 @@ import BusList from './pages/BusList';
 import BusDetail from './pages/BusDetail';
 import StudentsPage from './pages/StudentsPage';
 import StaffPage from './pages/StaffPage';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function Dashboard() {
   const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff'
@@ -29,7 +30,7 @@ function Dashboard() {
 
   return (
     <Layout current={page} onNavigate={navigate}>
-      {body}
+      <ErrorBoundary resetKey={`${page}:${openBusId || ''}`}>{body}</ErrorBoundary>
     </Layout>
   );
 }

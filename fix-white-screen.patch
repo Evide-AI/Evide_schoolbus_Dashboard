@@ -1,0 +1,104 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 7a6a790..e4ede28 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -6,6 +6,7 @@ import BusList from './pages/BusList';
+ import BusDetail from './pages/BusDetail';
+ import StudentsPage from './pages/StudentsPage';
+ import StaffPage from './pages/StaffPage';
++import ErrorBoundary from './components/ErrorBoundary';
+ 
+ function Dashboard() {
+   const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff'
+@@ -29,7 +30,7 @@ function Dashboard() {
+ 
+   return (
+     <Layout current={page} onNavigate={navigate}>
+-      {body}
++      <ErrorBoundary resetKey={`${page}:${openBusId || ''}`}>{body}</ErrorBoundary>
+     </Layout>
+   );
+ }
+diff --git a/src/components/ErrorBoundary.jsx b/src/components/ErrorBoundary.jsx
+new file mode 100644
+index 0000000..697f224
+--- /dev/null
++++ b/src/components/ErrorBoundary.jsx
+@@ -0,0 +1,35 @@
++import { Component } from 'react';
++
++// Shows a readable message instead of a blank white screen if a page crashes.
++export default class ErrorBoundary extends Component {
++  constructor(props) {
++    super(props);
++    this.state = { error: null };
++  }
++
++  static getDerivedStateFromError(error) {
++    return { error };
++  }
++
++  componentDidCatch(error, info) {
++    console.error('Page crashed:', error, info?.componentStack);
++  }
++
++  componentDidUpdate(prevProps) {
++    // Clear the error when the user switches to another page.
++    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
++      this.setState({ error: null });
++    }
++  }
++
++  render() {
++    if (!this.state.error) return this.props.children;
++    return (
++      <div className="empty-state card">
++        <h3>This page couldn't load</h3>
++        <p className="muted">{String(this.state.error?.message || this.state.error)}</p>
++        <button className="btn btn-secondary" onClick={() => window.location.reload()}>Reload page</button>
++      </div>
++    );
++  }
++}
+diff --git a/src/components/StaffFormModal.jsx b/src/components/StaffFormModal.jsx
+index 6ebf770..de44a50 100644
+--- a/src/components/StaffFormModal.jsx
++++ b/src/components/StaffFormModal.jsx
+@@ -7,7 +7,7 @@ import { staffAction, normalizePhone, localDigits, ROLE_LABEL } from '../lib/sta
+ // onSaved(staffRow, password?) — password is set when a login was created or reset.
+ export default function StaffFormModal({ staff, buses, crewByBus, onClose, onSaved, onRemoved }) {
+   const isEdit = Boolean(staff);
+-  const [fullName, setFullName] = useState(staff?.full_name || '');
++  const [fullName, setFullName] = useState(staff?.name_missing ? '' : (staff?.full_name || ''));
+   const [phone, setPhone] = useState(localDigits(staff?.phone));
+   const [role, setRole] = useState(staff?.role || 'driver');
+   const [busId, setBusId] = useState(staff?.bus_id || '');
+diff --git a/src/pages/StaffPage.jsx b/src/pages/StaffPage.jsx
+index 2b64bcb..c3f6bdf 100644
+--- a/src/pages/StaffPage.jsx
++++ b/src/pages/StaffPage.jsx
+@@ -38,7 +38,14 @@ export default function StaffPage() {
+       supabase.from('buses').select('id, bus_number').eq('school_id', schoolId).eq('is_active', true).order('bus_number'),
+     ]);
+     if (e1 || e2) { setError((e1 || e2).message); setLoading(false); return; }
+-    setStaff(s || []);
++    // Older rows (created before this page existed) may have no name/role yet.
++    setStaff((s || []).map((row) => ({
++      ...row,
++      name_missing: !(row.full_name || '').trim(),
++      full_name: (row.full_name || '').trim() || 'Name not set',
++      role: row.role === 'conductor' ? 'conductor' : 'driver',
++      is_active: row.is_active !== false,
++    })));
+     setBuses(b || []);
+     setLoading(false);
+   }, [schoolId]);
+@@ -60,7 +67,7 @@ export default function StaffPage() {
+     const qDigits = q.replace(/\D/g, '');
+     return staff.filter((s) =>
+       (filter === 'all' || s.role === filter) &&
+-      (!q || s.full_name.toLowerCase().includes(q) || (qDigits && String(s.phone || '').includes(qDigits))));
++      (!q || String(s.full_name || '').toLowerCase().includes(q) || (qDigits && String(s.phone || '').includes(qDigits))));
+   }, [staff, filter, query]);
+ 
+   function handleSaved(row, password, isReset = false) {
