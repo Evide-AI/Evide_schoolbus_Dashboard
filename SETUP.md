@@ -113,3 +113,48 @@ production. What you run yourself is the live login against your Supabase
 - **Notifications** write a row to the `notifications` table immediately;
   turning those rows into phone push notifications is the backend dispatch
   worker's job (parent app + FCM).
+
+## 4. Drivers & conductors (logins from the dashboard)
+
+Managers add drivers and conductors on the **Drivers & conductors** page. Each
+one gets a phone-number + password login for the driver app. Creating logins
+needs the Supabase admin key, so it runs in a Supabase Edge Function
+(`supabase/functions/manage-staff`) — the key never reaches the browser.
+
+**Step A — database:** run `supabase/staff_migration.sql` in the SQL editor.
+It only adds columns (`school_id`, `full_name`, `phone`, `role`, `is_active`,
+`created_at`) and a read policy; it's safe to run more than once.
+Conductors are rows in `drivers` with `role = 'conductor'`, so they get the
+same app access as drivers.
+
+**Step B — deploy the function** (Supabase CLI, once):
+
+```
+npx supabase login
+npx supabase link --project-ref rujjbkvqsqzholravzsx
+npx supabase functions deploy manage-staff
+```
+
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided to the function
+automatically — nothing to configure.
+
+**Step C — driver app login (Flutter).** Supabase's own phone login needs a paid
+SMS provider, so each phone number maps to an internal email. The driver only
+ever types their phone number; the app converts it:
+
+```dart
+String driverLoginEmail(String input) {
+  var d = input.replaceAll(RegExp(r'\D'), '');
+  if (d.length == 12 && d.startsWith('91')) d = d.substring(2);
+  if (d.length == 11 && d.startsWith('0')) d = d.substring(1);
+  return '91$d@driver.evide.in';
+}
+
+await Supabase.instance.client.auth.signInWithPassword(
+  email: driverLoginEmail(phoneController.text),
+  password: passwordController.text,
+);
+```
+
+After sign-in, read the `drivers` row for `auth.uid()` to get `role`,
+`bus_id` and `is_active`. Deactivated accounts are blocked from signing in.

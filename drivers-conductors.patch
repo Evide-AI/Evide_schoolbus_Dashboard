@@ -1,0 +1,1073 @@
+diff --git a/.env.example b/.env.example
+index 1364c9d..23a0472 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,3 +1,5 @@
+ VITE_SUPABASE_URL=https://rujjbkvqsqzholravzsx.supabase.co
+ VITE_SUPABASE_ANON_KEY=your-anon-key-here
+ VITE_API_BASE_URL=https://school.evide.in
++# Optional: Play Store link included when sharing driver logins on WhatsApp
++VITE_DRIVER_APP_URL=
+diff --git a/SETUP.md b/SETUP.md
+index 64e3090..9c75a80 100644
+--- a/SETUP.md
++++ b/SETUP.md
+@@ -113,3 +113,48 @@ production. What you run yourself is the live login against your Supabase
+ - **Notifications** write a row to the `notifications` table immediately;
+   turning those rows into phone push notifications is the backend dispatch
+   worker's job (parent app + FCM).
++
++## 4. Drivers & conductors (logins from the dashboard)
++
++Managers add drivers and conductors on the **Drivers & conductors** page. Each
++one gets a phone-number + password login for the driver app. Creating logins
++needs the Supabase admin key, so it runs in a Supabase Edge Function
++(`supabase/functions/manage-staff`) — the key never reaches the browser.
++
++**Step A — database:** run `supabase/staff_migration.sql` in the SQL editor.
++It only adds columns (`school_id`, `full_name`, `phone`, `role`, `is_active`,
++`created_at`) and a read policy; it's safe to run more than once.
++Conductors are rows in `drivers` with `role = 'conductor'`, so they get the
++same app access as drivers.
++
++**Step B — deploy the function** (Supabase CLI, once):
++
++```
++npx supabase login
++npx supabase link --project-ref rujjbkvqsqzholravzsx
++npx supabase functions deploy manage-staff
++```
++
++`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided to the function
++automatically — nothing to configure.
++
++**Step C — driver app login (Flutter).** Supabase's own phone login needs a paid
++SMS provider, so each phone number maps to an internal email. The driver only
++ever types their phone number; the app converts it:
++
++```dart
++String driverLoginEmail(String input) {
++  var d = input.replaceAll(RegExp(r'\D'), '');
++  if (d.length == 12 && d.startsWith('91')) d = d.substring(2);
++  if (d.length == 11 && d.startsWith('0')) d = d.substring(1);
++  return '91$d@driver.evide.in';
++}
++
++await Supabase.instance.client.auth.signInWithPassword(
++  email: driverLoginEmail(phoneController.text),
++  password: passwordController.text,
++);
++```
++
++After sign-in, read the `drivers` row for `auth.uid()` to get `role`,
++`bus_id` and `is_active`. Deactivated accounts are blocked from signing in.
+diff --git a/src/App.jsx b/src/App.jsx
+index 8c3c6aa..7a6a790 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -5,9 +5,10 @@ import Layout from './components/Layout';
+ import BusList from './pages/BusList';
+ import BusDetail from './pages/BusDetail';
+ import StudentsPage from './pages/StudentsPage';
++import StaffPage from './pages/StaffPage';
+ 
+ function Dashboard() {
+-  const [page, setPage] = useState('fleet');   // 'fleet' | 'students'
++  const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff'
+   const [openBusId, setOpenBusId] = useState(null);
+ 
+   function navigate(target) {
+@@ -18,6 +19,8 @@ function Dashboard() {
+   let body;
+   if (page === 'students') {
+     body = <StudentsPage />;
++  } else if (page === 'staff') {
++    body = <StaffPage />;
+   } else if (openBusId) {
+     body = <BusDetail busId={openBusId} onBack={() => setOpenBusId(null)} />;
+   } else {
+diff --git a/src/components/CredentialsModal.jsx b/src/components/CredentialsModal.jsx
+new file mode 100644
+index 0000000..45493ec
+--- /dev/null
++++ b/src/components/CredentialsModal.jsx
+@@ -0,0 +1,58 @@
++import { useState } from 'react';
++import Modal from './Modal';
++import { ROLE_LABEL, formatPhone } from '../lib/staff';
++
++const APP_URL = import.meta.env.VITE_DRIVER_APP_URL || '';
++
++// Shows a login once, right after it's created or reset. The password is not
++// stored anywhere readable, so this is the only time the manager sees it.
++export default function CredentialsModal({ staff, password, isReset = false, onClose }) {
++  const [copied, setCopied] = useState(false);
++  const role = ROLE_LABEL[staff.role] || 'Staff';
++
++  const message =
++    `Hi ${staff.full_name}, here is your Evide School Bus ${role.toLowerCase()} app login.\n\n` +
++    `Phone: ${formatPhone(staff.phone)}\nPassword: ${password}` +
++    (APP_URL ? `\n\nDownload the app: ${APP_URL}` : '');
++
++  async function copy() {
++    try {
++      await navigator.clipboard.writeText(message);
++      setCopied(true);
++      setTimeout(() => setCopied(false), 2000);
++    } catch {
++      window.prompt('Copy the login details:', message);
++    }
++  }
++
++  const waNumber = String(staff.phone || '').replace(/\D/g, '');
++  const waLink = `https://wa.me/${waNumber}?text=${encodeURIComponent(message)}`;
++
++  return (
++    <Modal title={isReset ? 'New password set' : `${role} added`} onClose={onClose} width={460}>
++      <p className="muted cred-intro">
++        Share these login details with {staff.full_name}. The password is shown only once. If it's lost, reset it from their profile.
++      </p>
++
++      <div className="cred-card">
++        <div className="cred-line">
++          <span className="cred-label">Phone</span>
++          <span className="cred-value">{formatPhone(staff.phone)}</span>
++        </div>
++        <div className="cred-line">
++          <span className="cred-label">Password</span>
++          <span className="cred-value cred-password">{password}</span>
++        </div>
++      </div>
++
++      <div className="cred-actions">
++        <a className="btn btn-whatsapp" href={waLink} target="_blank" rel="noreferrer">Send on WhatsApp</a>
++        <button type="button" className="btn btn-secondary" onClick={copy}>{copied ? 'Copied' : 'Copy details'}</button>
++      </div>
++
++      <div className="form-actions">
++        <button type="button" className="btn btn-primary" onClick={onClose}>Done</button>
++      </div>
++    </Modal>
++  );
++}
+diff --git a/src/components/Layout.css b/src/components/Layout.css
+index 1d468f9..30b24af 100644
+--- a/src/components/Layout.css
++++ b/src/components/Layout.css
+@@ -40,6 +40,7 @@
+ }
+ .sidebar-nav-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+ .sidebar-nav-item.active { background: rgba(255,255,255,0.12); color: #fff; }
++.nav-short { display: none; }
+ 
+ .sidebar-foot { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem; }
+ .sidebar-school { font-size: 0.92rem; font-weight: 600; }
+@@ -95,6 +96,8 @@
+     min-height: 52px;
+   }
+   .sidebar-nav-item svg { width: 22px; height: 22px; }
++  .nav-long { display: none; }
++  .nav-short { display: inline; }
+ 
+   /* Leave room for the tab bar */
+   .content {
+diff --git a/src/components/Layout.jsx b/src/components/Layout.jsx
+index 8beaa72..9e46f4e 100644
+--- a/src/components/Layout.jsx
++++ b/src/components/Layout.jsx
+@@ -17,7 +17,7 @@ export default function Layout({ current, onNavigate, children }) {
+             className={`sidebar-nav-item ${current === 'fleet' ? 'active' : ''}`}
+             onClick={() => onNavigate('fleet')}
+           >
+-            <BusIcon /> Fleet &amp; students
++            <BusIcon /> <span className="nav-long">Fleet &amp; students</span><span className="nav-short">Fleet</span>
+           </button>
+           <button
+             className={`sidebar-nav-item ${current === 'students' ? 'active' : ''}`}
+@@ -25,6 +25,12 @@ export default function Layout({ current, onNavigate, children }) {
+           >
+             <UsersIcon /> Students
+           </button>
++          <button
++            className={`sidebar-nav-item ${current === 'staff' ? 'active' : ''}`}
++            onClick={() => onNavigate('staff')}
++          >
++            <WheelIcon /> <span className="nav-long">Drivers &amp; conductors</span><span className="nav-short">Drivers</span>
++          </button>
+         </nav>
+ 
+         <div className="sidebar-foot">
+@@ -59,3 +65,13 @@ function UsersIcon() {
+     </svg>
+   );
+ }
++
++function WheelIcon() {
++  return (
++    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
++      <circle cx="12" cy="12" r="9" />
++      <circle cx="12" cy="12" r="2.2" />
++      <path d="M3.5 10.5l6.4 1M20.5 10.5l-6.4 1M12 14.2V21" />
++    </svg>
++  );
++}
+diff --git a/src/components/StaffFormModal.jsx b/src/components/StaffFormModal.jsx
+new file mode 100644
+index 0000000..6ebf770
+--- /dev/null
++++ b/src/components/StaffFormModal.jsx
+@@ -0,0 +1,201 @@
++import { useState } from 'react';
++import Modal from './Modal';
++import ConfirmDialog from './ConfirmDialog';
++import { staffAction, normalizePhone, localDigits, ROLE_LABEL } from '../lib/staff';
++
++// Create or edit a driver / conductor.
++// onSaved(staffRow, password?) — password is set when a login was created or reset.
++export default function StaffFormModal({ staff, buses, crewByBus, onClose, onSaved, onRemoved }) {
++  const isEdit = Boolean(staff);
++  const [fullName, setFullName] = useState(staff?.full_name || '');
++  const [phone, setPhone] = useState(localDigits(staff?.phone));
++  const [role, setRole] = useState(staff?.role || 'driver');
++  const [busId, setBusId] = useState(staff?.bus_id || '');
++  const [passwordMode, setPasswordMode] = useState('auto'); // auto | custom
++  const [password, setPassword] = useState('');
++  const [saving, setSaving] = useState(false);
++  const [error, setError] = useState(null);
++  const [confirm, setConfirm] = useState(null); // 'reset' | 'deactivate' | 'remove'
++
++  const phoneOk = normalizePhone(phone) !== null;
++  const others = (crewByBus[busId] || []).filter((c) => c.id !== staff?.id);
++
++  async function handleSubmit(e) {
++    e.preventDefault();
++    if (!phoneOk) { setError('Enter a valid 10-digit mobile number.'); return; }
++    if (!isEdit && passwordMode === 'custom' && password.length < 8) {
++      setError('Password must be at least 8 characters.');
++      return;
++    }
++    setSaving(true);
++    setError(null);
++    try {
++      if (isEdit) {
++        const { staff: row } = await staffAction('update', {
++          id: staff.id, full_name: fullName, phone, role, bus_id: busId || null,
++        });
++        onSaved(row);
++      } else {
++        const res = await staffAction('create', {
++          full_name: fullName, phone, role, bus_id: busId || null,
++          ...(passwordMode === 'custom' ? { password } : {}),
++        });
++        onSaved(res.staff, res.password);
++      }
++    } catch (ex) {
++      setError(ex.message);
++      setSaving(false);
++    }
++  }
++
++  async function runConfirmed() {
++    const action = confirm;
++    setConfirm(null);
++    setSaving(true);
++    setError(null);
++    try {
++      if (action === 'reset') {
++        const { password: pw } = await staffAction('reset_password', { id: staff.id });
++        onSaved(staff, pw, true);
++      } else if (action === 'deactivate' || action === 'activate') {
++        const { staff: row } = await staffAction('set_active', { id: staff.id, active: action === 'activate' });
++        onSaved(row);
++      } else if (action === 'remove') {
++        await staffAction('remove', { id: staff.id });
++        onRemoved();
++      }
++    } catch (ex) {
++      setError(ex.message);
++      setSaving(false);
++    }
++  }
++
++  const roleLabel = ROLE_LABEL[role].toLowerCase();
++
++  if (confirm) {
++    const copy = {
++      reset: {
++        title: 'Reset password',
++        message: `Create a new password for ${staff.full_name}? Their old password will stop working.`,
++        label: 'Reset password', tone: 'default',
++      },
++      deactivate: {
++        title: 'Deactivate account',
++        message: `${staff.full_name} won't be able to sign in to the app. You can turn it back on any time.`,
++        label: 'Deactivate', tone: 'danger',
++      },
++      activate: {
++        title: 'Activate account',
++        message: `Let ${staff.full_name} sign in to the app again with their existing password?`,
++        label: 'Activate', tone: 'default',
++      },
++      remove: {
++        title: 'Remove permanently',
++        message: `Delete ${staff.full_name} and their login? This can't be undone. If you might need them again, deactivate instead.`,
++        label: 'Remove', tone: 'danger',
++      },
++    }[confirm];
++    return (
++      <ConfirmDialog title={copy.title} message={copy.message} confirmLabel={copy.label} tone={copy.tone}
++        onConfirm={runConfirmed} onCancel={() => setConfirm(null)} />
++    );
++  }
++
++  return (
++    <Modal title={isEdit ? `Edit ${staff.full_name}` : 'Add driver or conductor'} onClose={onClose} width={520}>
++      <form onSubmit={handleSubmit}>
++        {error && <div className="form-error">{error}</div>}
++
++        <div className="form-field">
++          <span className="field-label">Role</span>
++          <div className="segmented" role="radiogroup" aria-label="Role">
++            {['driver', 'conductor'].map((r) => (
++              <button type="button" key={r} role="radio" aria-checked={role === r}
++                className={`segmented-item ${role === r ? 'is-on' : ''}`} onClick={() => setRole(r)}>
++                {ROLE_LABEL[r]}
++              </button>
++            ))}
++          </div>
++        </div>
++
++        <div className="form-field">
++          <label htmlFor="staff_name">Full name</label>
++          <input id="staff_name" value={fullName} onChange={(e) => setFullName(e.target.value)} required autoComplete="off" />
++        </div>
++
++        <div className="form-field">
++          <label htmlFor="staff_phone">Mobile number</label>
++          <div className="phone-input">
++            <span className="phone-prefix">+91</span>
++            <input id="staff_phone" value={phone} onChange={(e) => setPhone(e.target.value)} required
++              inputMode="tel" autoComplete="off" placeholder="10-digit number" />
++          </div>
++          <p className="muted form-hint">
++            {isEdit ? 'This is their login. Changing it changes the number they sign in with.' : `The ${roleLabel} signs in to the app with this number.`}
++          </p>
++        </div>
++
++        <div className="form-field">
++          <label htmlFor="staff_bus">Bus</label>
++          <select id="staff_bus" value={busId} onChange={(e) => setBusId(e.target.value)}>
++            <option value="">Not assigned yet</option>
++            {buses.map((b) => <option key={b.id} value={b.id}>{b.bus_number}</option>)}
++          </select>
++          {others.length > 0 && (
++            <p className="muted form-hint">
++              Already on this bus: {others.map((c) => `${c.full_name} (${ROLE_LABEL[c.role].toLowerCase()})`).join(', ')}
++            </p>
++          )}
++        </div>
++
++        {!isEdit && (
++          <div className="form-field">
++            <span className="field-label">Password</span>
++            <div className="segmented" role="radiogroup" aria-label="Password">
++              <button type="button" role="radio" aria-checked={passwordMode === 'auto'}
++                className={`segmented-item ${passwordMode === 'auto' ? 'is-on' : ''}`} onClick={() => setPasswordMode('auto')}>
++                Create one for me
++              </button>
++              <button type="button" role="radio" aria-checked={passwordMode === 'custom'}
++                className={`segmented-item ${passwordMode === 'custom' ? 'is-on' : ''}`} onClick={() => setPasswordMode('custom')}>
++                I'll set it
++              </button>
++            </div>
++            {passwordMode === 'custom' && (
++              <input style={{ marginTop: '0.6rem' }} value={password} onChange={(e) => setPassword(e.target.value)}
++                placeholder="At least 8 characters" autoComplete="new-password" aria-label="Password" />
++            )}
++          </div>
++        )}
++
++        {isEdit && (
++          <div className="account-box">
++            <div className="account-box-head">
++              <span>Login</span>
++              <span className={`status-dot ${staff.is_active ? 'is-on' : ''}`}>{staff.is_active ? 'Active' : 'Deactivated'}</span>
++            </div>
++            <div className="account-box-actions">
++              <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => setConfirm('reset')}>
++                Reset password
++              </button>
++              <button type="button" className="btn btn-secondary btn-sm" disabled={saving}
++                onClick={() => setConfirm(staff.is_active ? 'deactivate' : 'activate')}>
++                {staff.is_active ? 'Deactivate' : 'Activate'}
++              </button>
++              <button type="button" className="btn btn-danger btn-sm" disabled={saving} onClick={() => setConfirm('remove')}>
++                Remove
++              </button>
++            </div>
++          </div>
++        )}
++
++        <div className="form-actions">
++          <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
++          <button type="submit" className="btn btn-primary" disabled={saving}>
++            {saving ? 'Saving…' : isEdit ? 'Save changes' : `Add ${roleLabel}`}
++          </button>
++        </div>
++      </form>
++    </Modal>
++  );
++}
+diff --git a/src/lib/staff.js b/src/lib/staff.js
+new file mode 100644
+index 0000000..2597d6a
+--- /dev/null
++++ b/src/lib/staff.js
+@@ -0,0 +1,45 @@
++import { supabase } from './supabase';
++
++// All writes for drivers/conductors go through the manage-staff Edge Function,
++// because creating logins needs the Supabase admin key (never in the browser).
++export async function staffAction(action, payload = {}) {
++  const { data, error } = await supabase.functions.invoke('manage-staff', {
++    body: { action, ...payload },
++  });
++  if (error) {
++    let message = error.message;
++    try {
++      const body = await error.context?.json?.();
++      if (body?.error) message = body.error;
++    } catch { /* not JSON */ }
++    if (/Failed to send a request|fetch/i.test(message)) {
++      message = 'Could not reach the server. Check your internet connection and try again.';
++    }
++    throw new Error(message);
++  }
++  return data;
++}
++
++export const ROLE_LABEL = { driver: 'Driver', conductor: 'Conductor' };
++
++// Same rules as the Edge Function, for instant feedback in the form.
++export function normalizePhone(input) {
++  let d = String(input ?? '').replace(/\D/g, '');
++  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
++  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
++  if (!/^[6-9]\d{9}$/.test(d)) return null;
++  return `+91${d}`;
++}
++
++// +919947496965 -> +91 99474 96965
++export function formatPhone(phone) {
++  const d = String(phone || '').replace(/\D/g, '');
++  if (d.length === 12 && d.startsWith('91')) return `+91 ${d.slice(2, 7)} ${d.slice(7)}`;
++  return phone || '';
++}
++
++// Local 10 digits for the edit form: +919947496965 -> 9947496965
++export function localDigits(phone) {
++  const d = String(phone || '').replace(/\D/g, '');
++  return d.length === 12 && d.startsWith('91') ? d.slice(2) : d;
++}
+diff --git a/src/pages/StaffPage.css b/src/pages/StaffPage.css
+new file mode 100644
+index 0000000..389d06f
+--- /dev/null
++++ b/src/pages/StaffPage.css
+@@ -0,0 +1,104 @@
++.staff-notice {
++  background: var(--signal-soft);
++  color: #7a5500;
++  border-radius: var(--radius-sm);
++  padding: 0.65rem 0.9rem;
++  font-size: 0.88rem;
++  margin-bottom: 1.1rem;
++}
++
++.staff-toolbar { display: flex; gap: 0.8rem; align-items: center; margin-bottom: 1.2rem; }
++.staff-toolbar input { max-width: 320px; }
++
++.staff-table { overflow: hidden; }
++.staff-row {
++  display: grid;
++  grid-template-columns: 2fr 1.3fr 1fr 0.9fr auto;
++  align-items: center;
++  gap: 1rem;
++  padding: 0.7rem 1.2rem;
++  border-bottom: 1px solid var(--line);
++  font-size: 0.9rem;
++}
++.staff-row:last-child { border-bottom: none; }
++.staff-row-head { font-size: 0.76rem; font-weight: 600; color: var(--ink-faint); background: var(--paper); }
++.staff-row.is-inactive .staff-name-cell,
++.staff-row.is-inactive .staff-phone { opacity: 0.55; }
++.staff-name-cell { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
++.staff-name-text { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex-wrap: wrap; }
++.staff-phone { color: var(--ink-soft); text-decoration: none; font-variant-numeric: tabular-nums; }
++.staff-phone:hover { color: var(--accent); }
++
++.role-tag { font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 4px; }
++.role-driver { background: #eef0f4; color: var(--ink); }
++.role-conductor { background: var(--signal-soft); color: #7a5500; }
++
++.status-dot { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--ink-faint); }
++.status-dot::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); }
++.status-dot.is-on { color: var(--go); }
++.status-dot.is-on::before { background: var(--go); }
++
++/* Segmented control (role, password mode, filters) */
++.field-label { display: block; font-size: 0.78rem; font-weight: 550; color: var(--ink-soft); margin-bottom: 0.3rem; }
++.segmented {
++  display: flex; padding: 3px; gap: 3px;
++  background: var(--paper); border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
++}
++.segmented-item {
++  flex: 1; padding: 0.45rem 0.7rem; border-radius: 4px;
++  font-size: 0.86rem; font-weight: 550; color: var(--ink-soft);
++}
++.segmented-item.is-on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(32,43,73,0.12); }
++.segmented-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
++.segmented-compact { flex: 0 0 auto; }
++.segmented-compact .segmented-item { flex: 0 0 auto; padding: 0.35rem 0.8rem; }
++
++.phone-input { display: flex; align-items: stretch; }
++.phone-prefix {
++  display: grid; place-items: center; padding: 0 0.7rem;
++  background: var(--paper); border: 1px solid var(--line-strong); border-right: none;
++  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
++  font-size: 0.9rem; color: var(--ink-soft);
++}
++.phone-input input { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
++
++.account-box { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0.8rem 0.9rem; margin-top: 0.4rem; }
++.account-box-head {
++  display: flex; justify-content: space-between; align-items: center;
++  font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); margin-bottom: 0.7rem;
++}
++.account-box-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
++
++/* Credentials */
++.cred-intro { font-size: 0.88rem; line-height: 1.5; margin-bottom: 1rem; }
++.cred-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); }
++.cred-line { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: 0.85rem 1rem; }
++.cred-line + .cred-line { border-top: 1px solid var(--line); }
++.cred-label { font-size: 0.82rem; color: var(--ink-faint); }
++.cred-value { font-weight: 600; font-variant-numeric: tabular-nums; }
++.cred-password { font-size: 1.35rem; letter-spacing: 0.06em; font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
++.cred-actions { display: flex; gap: 0.6rem; margin-top: 1rem; }
++.cred-actions .btn { flex: 1; text-decoration: none; }
++.btn-whatsapp { background: #1f8a54; color: #fff; }
++.btn-whatsapp:hover { background: #197046; }
++
++@media (max-width: 720px) {
++  .staff-toolbar { flex-direction: column; align-items: stretch; }
++  .staff-toolbar input { max-width: none; }
++  .segmented-compact .segmented-item { flex: 1; }
++
++  .staff-row-head { display: none; }
++  .staff-row {
++    grid-template-columns: 1fr auto;
++    grid-template-areas: "name bus" "phone actions" "status actions";
++    gap: 0.3rem 0.75rem;
++    padding: 0.85rem 1rem;
++  }
++  .staff-row > :nth-child(1) { grid-area: name; }
++  .staff-row > :nth-child(2) { grid-area: phone; padding-left: calc(34px + 0.7rem); font-size: 0.85rem; }
++  .staff-row > :nth-child(3) { grid-area: bus; justify-self: end; }
++  .staff-row > :nth-child(4) { grid-area: status; padding-left: calc(34px + 0.7rem); }
++  .staff-row > :nth-child(5) { grid-area: actions; align-self: center; }
++  .cred-actions { flex-direction: column; }
++  .staff-head { flex-direction: column; align-items: stretch; }
++}
+diff --git a/src/pages/StaffPage.jsx b/src/pages/StaffPage.jsx
+new file mode 100644
+index 0000000..2b64bcb
+--- /dev/null
++++ b/src/pages/StaffPage.jsx
+@@ -0,0 +1,164 @@
++import { useCallback, useEffect, useMemo, useState } from 'react';
++import { supabase } from '../lib/supabase';
++import { useAuth } from '../lib/AuthContext';
++import { ROLE_LABEL, formatPhone } from '../lib/staff';
++import StaffFormModal from '../components/StaffFormModal';
++import CredentialsModal from '../components/CredentialsModal';
++import './StudentsPage.css';
++import './StaffPage.css';
++
++const FILTERS = [
++  { id: 'all', label: 'All' },
++  { id: 'driver', label: 'Drivers' },
++  { id: 'conductor', label: 'Conductors' },
++];
++
++export default function StaffPage() {
++  const { managementUser } = useAuth();
++  const schoolId = managementUser?.school_id;
++
++  const [staff, setStaff] = useState([]);
++  const [buses, setBuses] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState(null);
++  const [filter, setFilter] = useState('all');
++  const [query, setQuery] = useState('');
++
++  const [adding, setAdding] = useState(false);
++  const [editing, setEditing] = useState(null);
++  const [credentials, setCredentials] = useState(null); // { staff, password, isReset }
++
++  const load = useCallback(async () => {
++    if (!schoolId) return;
++    setLoading(true);
++    setError(null);
++    const [{ data: s, error: e1 }, { data: b, error: e2 }] = await Promise.all([
++      supabase.from('drivers').select('id, full_name, phone, role, bus_id, is_active')
++        .eq('school_id', schoolId).order('full_name'),
++      supabase.from('buses').select('id, bus_number').eq('school_id', schoolId).eq('is_active', true).order('bus_number'),
++    ]);
++    if (e1 || e2) { setError((e1 || e2).message); setLoading(false); return; }
++    setStaff(s || []);
++    setBuses(b || []);
++    setLoading(false);
++  }, [schoolId]);
++
++  useEffect(() => { load(); }, [load]);
++
++  const busName = useMemo(() => Object.fromEntries(buses.map((b) => [b.id, b.bus_number])), [buses]);
++
++  const crewByBus = useMemo(() => {
++    const m = {};
++    for (const s of staff) if (s.bus_id && s.is_active) (m[s.bus_id] ||= []).push(s);
++    return m;
++  }, [staff]);
++
++  const busesWithoutDriver = buses.filter((b) => !(crewByBus[b.id] || []).some((c) => c.role === 'driver'));
++
++  const filtered = useMemo(() => {
++    const q = query.trim().toLowerCase();
++    const qDigits = q.replace(/\D/g, '');
++    return staff.filter((s) =>
++      (filter === 'all' || s.role === filter) &&
++      (!q || s.full_name.toLowerCase().includes(q) || (qDigits && String(s.phone || '').includes(qDigits))));
++  }, [staff, filter, query]);
++
++  function handleSaved(row, password, isReset = false) {
++    setAdding(false);
++    setEditing(null);
++    if (password) setCredentials({ staff: row, password, isReset });
++    load();
++  }
++
++  const driverCount = staff.filter((s) => s.role === 'driver').length;
++  const conductorCount = staff.length - driverCount;
++
++  return (
++    <div>
++      <header className="page-head staff-head">
++        <div>
++          <h1>Drivers &amp; conductors</h1>
++          <p className="muted">
++            {driverCount} driver{driverCount === 1 ? '' : 's'}, {conductorCount} conductor{conductorCount === 1 ? '' : 's'}
++          </p>
++        </div>
++        <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add driver or conductor</button>
++      </header>
++
++      {error && <div className="page-error">{error}</div>}
++
++      {!loading && busesWithoutDriver.length > 0 && staff.length > 0 && (
++        <div className="staff-notice">
++          {busesWithoutDriver.length === 1
++            ? <><strong>{busesWithoutDriver[0].bus_number}</strong> has no driver assigned.</>
++            : <><strong>{busesWithoutDriver.length} buses</strong> have no driver: {busesWithoutDriver.map((b) => b.bus_number).join(', ')}.</>}
++        </div>
++      )}
++
++      <div className="staff-toolbar">
++        <div className="segmented segmented-compact" role="tablist">
++          {FILTERS.map((f) => (
++            <button key={f.id} role="tab" aria-selected={filter === f.id}
++              className={`segmented-item ${filter === f.id ? 'is-on' : ''}`} onClick={() => setFilter(f.id)}>
++              {f.label}
++            </button>
++          ))}
++        </div>
++        <input type="text" placeholder="Search by name or phone…" value={query} onChange={(e) => setQuery(e.target.value)} />
++      </div>
++
++      {loading ? (
++        <div className="muted loading-row">Loading…</div>
++      ) : staff.length === 0 ? (
++        <div className="empty-state card">
++          <h3>No drivers or conductors yet</h3>
++          <p className="muted">Add them here to give each one a login for the driver app.</p>
++          <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add driver or conductor</button>
++        </div>
++      ) : filtered.length === 0 ? (
++        <div className="empty-state card"><h3>No one matches</h3></div>
++      ) : (
++        <div className="staff-table card">
++          <div className="staff-row staff-row-head">
++            <span>Name</span><span>Phone</span><span>Bus</span><span>Status</span><span></span>
++          </div>
++          {filtered.map((s) => (
++            <div className={`staff-row ${s.is_active ? '' : 'is-inactive'}`} key={s.id}>
++              <span className="staff-name-cell">
++                <span className="roster-avatar"><span className="roster-avatar-initial">{(s.full_name[0] || '?').toUpperCase()}</span></span>
++                <span className="staff-name-text">
++                  <span className="roster-name">{s.full_name}</span>
++                  <span className={`role-tag role-${s.role}`}>{ROLE_LABEL[s.role]}</span>
++                </span>
++              </span>
++              <a className="staff-phone" href={`tel:${s.phone}`}>{formatPhone(s.phone)}</a>
++              <span>
++                {s.bus_id
++                  ? <span className="bus-tag">{busName[s.bus_id] || 'Removed bus'}</span>
++                  : <span className="bus-tag bus-tag-free">No bus</span>}
++              </span>
++              <span className={`status-dot ${s.is_active ? 'is-on' : ''}`}>{s.is_active ? 'Active' : 'Deactivated'}</span>
++              <span className="students-row-actions">
++                <button className="btn btn-secondary btn-sm" onClick={() => setEditing(s)}>Manage</button>
++              </span>
++            </div>
++          ))}
++        </div>
++      )}
++
++      {(adding || editing) && (
++        <StaffFormModal
++          staff={editing}
++          buses={buses}
++          crewByBus={crewByBus}
++          onClose={() => { setAdding(false); setEditing(null); }}
++          onSaved={handleSaved}
++          onRemoved={() => { setEditing(null); load(); }}
++        />
++      )}
++      {credentials && (
++        <CredentialsModal {...credentials} onClose={() => setCredentials(null)} />
++      )}
++    </div>
++  );
++}
+diff --git a/supabase/functions/manage-staff/index.ts b/supabase/functions/manage-staff/index.ts
+new file mode 100644
+index 0000000..f9a47df
+--- /dev/null
++++ b/supabase/functions/manage-staff/index.ts
+@@ -0,0 +1,275 @@
++// manage-staff — create and manage driver / conductor logins.
++//
++// Called by the management dashboard with the manager's own session token.
++// Every action checks that the caller is a management user and that the
++// driver / bus belongs to the caller's school before touching anything.
++//
++// Drivers log in with phone number + password. Supabase's built-in phone login
++// needs a paid SMS provider, so each phone maps to an internal email:
++//   +91 99474 96965  ->  919947496965@driver.evide.in
++// The driver never sees this; the app converts the phone number the same way.
++//
++// Deploy:  supabase functions deploy manage-staff
++// (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided automatically.)
++
++import { createClient } from 'npm:@supabase/supabase-js@2';
++
++const LOGIN_EMAIL_DOMAIN = 'driver.evide.in';
++const ROLES = ['driver', 'conductor'];
++
++const corsHeaders = {
++  'Access-Control-Allow-Origin': '*',
++  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
++  'Access-Control-Allow-Methods': 'POST, OPTIONS',
++};
++
++const admin = createClient(
++  Deno.env.get('SUPABASE_URL')!,
++  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
++  { auth: { persistSession: false, autoRefreshToken: false } },
++);
++
++class HttpError extends Error {
++  status: number;
++  constructor(status: number, message: string) { super(message); this.status = status; }
++}
++
++function json(body: unknown, status = 200) {
++  return new Response(JSON.stringify(body), {
++    status,
++    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
++  });
++}
++
++// Accepts "9947496965", "+91 99474 96965", "099474-96965", "919947496965".
++// Returns "+919947496965" or null.
++function normalizePhone(input: unknown): string | null {
++  let d = String(input ?? '').replace(/\D/g, '');
++  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
++  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
++  if (!/^[6-9]\d{9}$/.test(d)) return null;
++  return `+91${d}`;
++}
++
++function loginEmail(phone: string) {
++  return `${phone.replace(/\D/g, '')}@${LOGIN_EMAIL_DOMAIN}`;
++}
++
++// Easy to read aloud and type on a phone: 4 letters + 4 digits, no look-alikes.
++function generatePassword() {
++  const letters = 'abcdefghjkmnpqrstuvwxyz';
++  const bytes = crypto.getRandomValues(new Uint8Array(8));
++  let out = '';
++  for (let i = 0; i < 4; i++) out += letters[bytes[i] % letters.length];
++  for (let i = 4; i < 8; i++) out += String(bytes[i] % 10);
++  return out;
++}
++
++function checkPassword(pw: unknown): string {
++  const p = String(pw ?? '');
++  if (p.length < 8) throw new HttpError(400, 'Password must be at least 8 characters.');
++  if (p.length > 72) throw new HttpError(400, 'Password is too long.');
++  return p;
++}
++
++function cleanName(v: unknown): string {
++  const name = String(v ?? '').trim().replace(/\s+/g, ' ');
++  if (!name) throw new HttpError(400, 'Name is required.');
++  if (name.length > 120) throw new HttpError(400, 'Name is too long.');
++  return name;
++}
++
++function cleanRole(v: unknown): string {
++  const role = String(v ?? '');
++  if (!ROLES.includes(role)) throw new HttpError(400, 'Role must be driver or conductor.');
++  return role;
++}
++
++async function callerSchoolId(req: Request): Promise<string> {
++  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
++  if (!token) throw new HttpError(401, 'Not signed in.');
++  const { data: { user }, error } = await admin.auth.getUser(token);
++  if (error || !user) throw new HttpError(401, 'Your session has expired. Sign in again.');
++
++  const { data: mu, error: muErr } = await admin
++    .from('management_users').select('school_id').eq('auth_user_id', user.id).maybeSingle();
++  if (muErr) throw new HttpError(500, muErr.message);
++  if (!mu?.school_id) throw new HttpError(403, 'Only school management can manage drivers.');
++  return mu.school_id;
++}
++
++async function assertBusInSchool(busId: unknown, schoolId: string): Promise<string | null> {
++  if (busId === null || busId === undefined || busId === '') return null;
++  const { data, error } = await admin.from('buses').select('id, school_id').eq('id', busId).maybeSingle();
++  if (error) throw new HttpError(500, error.message);
++  if (!data || data.school_id !== schoolId) throw new HttpError(400, 'That bus is not in your school.');
++  return data.id;
++}
++
++async function loadStaff(id: unknown, schoolId: string) {
++  const { data, error } = await admin
++    .from('drivers').select('id, auth_user_id, school_id, phone, full_name').eq('id', id).maybeSingle();
++  if (error) throw new HttpError(500, error.message);
++  if (!data || data.school_id !== schoolId) throw new HttpError(404, 'Driver not found.');
++  return data;
++}
++
++async function phoneTaken(phone: string, exceptId?: string) {
++  let q = admin.from('drivers').select('id').eq('phone', phone);
++  if (exceptId) q = q.neq('id', exceptId);
++  const { data, error } = await q.limit(1);
++  if (error) throw new HttpError(500, error.message);
++  return (data || []).length > 0;
++}
++
++const STAFF_COLUMNS = 'id, full_name, phone, role, bus_id, is_active, created_at';
++
++// ---------------------------------------------------------------- actions
++
++async function createStaff(body: any, schoolId: string) {
++  const full_name = cleanName(body.full_name);
++  const role = cleanRole(body.role);
++  const phone = normalizePhone(body.phone);
++  if (!phone) throw new HttpError(400, 'Enter a valid 10-digit Indian mobile number.');
++  const bus_id = await assertBusInSchool(body.bus_id, schoolId);
++  const password = body.password ? checkPassword(body.password) : generatePassword();
++
++  if (await phoneTaken(phone)) throw new HttpError(409, 'This phone number already has a driver or conductor account.');
++
++  const { data: created, error: authErr } = await admin.auth.admin.createUser({
++    email: loginEmail(phone),
++    password,
++    email_confirm: true,
++    user_metadata: { account_type: 'staff', role, full_name, phone },
++  });
++  if (authErr || !created?.user) {
++    const msg = authErr?.message || 'Could not create the login.';
++    if (/already.*registered|already exists/i.test(msg)) {
++      throw new HttpError(409, 'A login for this phone number already exists. Contact Evide support to clear it.');
++    }
++    throw new HttpError(500, msg);
++  }
++
++  const { data: row, error: insErr } = await admin.from('drivers').insert({
++    auth_user_id: created.user.id,
++    school_id: schoolId,
++    full_name,
++    phone,
++    role,
++    bus_id,
++    is_active: true,
++  }).select(STAFF_COLUMNS).single();
++
++  if (insErr) {
++    // Roll back the login so a retry with the same phone works.
++    await admin.auth.admin.deleteUser(created.user.id);
++    throw new HttpError(insErr.code === '23505' ? 409 : 500,
++      insErr.code === '23505' ? 'This phone number already has a driver or conductor account.' : insErr.message);
++  }
++
++  return { staff: row, password };
++}
++
++async function updateStaff(body: any, schoolId: string) {
++  const current = await loadStaff(body.id, schoolId);
++  const patch: Record<string, unknown> = {};
++
++  if ('full_name' in body) patch.full_name = cleanName(body.full_name);
++  if ('role' in body) patch.role = cleanRole(body.role);
++  if ('bus_id' in body) patch.bus_id = await assertBusInSchool(body.bus_id, schoolId);
++
++  let newPhone: string | null = null;
++  if ('phone' in body) {
++    newPhone = normalizePhone(body.phone);
++    if (!newPhone) throw new HttpError(400, 'Enter a valid 10-digit Indian mobile number.');
++    if (newPhone !== current.phone) {
++      if (await phoneTaken(newPhone, current.id)) {
++        throw new HttpError(409, 'This phone number already has a driver or conductor account.');
++      }
++      patch.phone = newPhone;
++    } else {
++      newPhone = null;
++    }
++  }
++
++  // Phone is the login, so change the auth account first.
++  if (newPhone && current.auth_user_id) {
++    const { error } = await admin.auth.admin.updateUserById(current.auth_user_id, {
++      email: loginEmail(newPhone),
++      email_confirm: true,
++    });
++    if (error) throw new HttpError(500, `Could not change the login phone: ${error.message}`);
++  }
++
++  const { data, error } = await admin.from('drivers').update(patch).eq('id', current.id).select(STAFF_COLUMNS).single();
++  if (error) {
++    // Put the old login back if the row update failed after a phone change.
++    if (newPhone && current.auth_user_id && current.phone) {
++      await admin.auth.admin.updateUserById(current.auth_user_id, { email: loginEmail(current.phone), email_confirm: true });
++    }
++    throw new HttpError(500, error.message);
++  }
++  return { staff: data };
++}
++
++async function resetPassword(body: any, schoolId: string) {
++  const current = await loadStaff(body.id, schoolId);
++  if (!current.auth_user_id) throw new HttpError(400, 'This person has no login yet.');
++  const password = body.password ? checkPassword(body.password) : generatePassword();
++  const { error } = await admin.auth.admin.updateUserById(current.auth_user_id, { password });
++  if (error) throw new HttpError(500, error.message);
++  return { password };
++}
++
++async function setActive(body: any, schoolId: string) {
++  const current = await loadStaff(body.id, schoolId);
++  const active = Boolean(body.active);
++  if (current.auth_user_id) {
++    const { error } = await admin.auth.admin.updateUserById(current.auth_user_id, {
++      ban_duration: active ? 'none' : '876000h', // ~100 years
++    });
++    if (error) throw new HttpError(500, error.message);
++  }
++  const { data, error } = await admin.from('drivers').update({ is_active: active })
++    .eq('id', current.id).select(STAFF_COLUMNS).single();
++  if (error) throw new HttpError(500, error.message);
++  return { staff: data };
++}
++
++async function removeStaff(body: any, schoolId: string) {
++  const current = await loadStaff(body.id, schoolId);
++  const { error } = await admin.from('drivers').delete().eq('id', current.id);
++  if (error) {
++    if (error.code === '23503') {
++      throw new HttpError(409, 'This person has attendance records, so they can\'t be removed. Deactivate their account instead.');
++    }
++    throw new HttpError(500, error.message);
++  }
++  if (current.auth_user_id) await admin.auth.admin.deleteUser(current.auth_user_id);
++  return { ok: true };
++}
++
++// ---------------------------------------------------------------- handler
++
++Deno.serve(async (req) => {
++  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
++  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
++
++  try {
++    const schoolId = await callerSchoolId(req);
++    const body = await req.json().catch(() => ({}));
++    switch (body.action) {
++      case 'create': return json(await createStaff(body, schoolId));
++      case 'update': return json(await updateStaff(body, schoolId));
++      case 'reset_password': return json(await resetPassword(body, schoolId));
++      case 'set_active': return json(await setActive(body, schoolId));
++      case 'remove': return json(await removeStaff(body, schoolId));
++      default: throw new HttpError(400, 'Unknown action.');
++    }
++  } catch (e) {
++    const status = e instanceof HttpError ? e.status : 500;
++    const message = e instanceof Error ? e.message : 'Something went wrong.';
++    if (status >= 500) console.error(e);
++    return json({ error: message }, status);
++  }
++});
+diff --git a/supabase/staff_migration.sql b/supabase/staff_migration.sql
+new file mode 100644
+index 0000000..2ea0ab9
+--- /dev/null
++++ b/supabase/staff_migration.sql
+@@ -0,0 +1,35 @@
++-- Drivers & conductors managed from the dashboard.
++-- Safe to run more than once. It only ADDS columns/policies; nothing is dropped.
++--
++-- Conductors live in the same `drivers` table with role = 'conductor', so every
++-- existing driver policy (own bus students, attendance) applies to them too.
++
++alter table drivers add column if not exists school_id uuid references schools(id) on delete cascade;
++alter table drivers add column if not exists full_name text;
++alter table drivers add column if not exists phone text;
++alter table drivers add column if not exists role text not null default 'driver';
++alter table drivers add column if not exists is_active boolean not null default true;
++alter table drivers add column if not exists created_at timestamptz not null default now();
++
++-- A driver can exist before being put on a bus.
++alter table drivers alter column bus_id drop not null;
++
++do $$ begin
++  alter table drivers add constraint drivers_role_check check (role in ('driver', 'conductor'));
++exception when duplicate_object then null; end $$;
++
++-- Backfill school for any existing drivers from their bus.
++update drivers d set school_id = b.school_id
++from buses b
++where d.bus_id = b.id and d.school_id is null;
++
++-- One account per phone number (phones are stored as +91XXXXXXXXXX).
++create unique index if not exists drivers_phone_unique on drivers(phone) where phone is not null;
++create index if not exists idx_drivers_school on drivers(school_id);
++
++-- Management can SEE their school's drivers/conductors.
++-- All changes (create, edit, reset password, deactivate, remove) go through the
++-- manage-staff Edge Function, which checks the school before writing.
++drop policy if exists management_reads_school_drivers on drivers;
++create policy management_reads_school_drivers on drivers for select using (
++  school_id in (select school_id from management_users where auth_user_id = auth.uid()));

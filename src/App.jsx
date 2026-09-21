@@ -5,9 +5,10 @@ import Layout from './components/Layout';
 import BusList from './pages/BusList';
 import BusDetail from './pages/BusDetail';
 import StudentsPage from './pages/StudentsPage';
+import StaffPage from './pages/StaffPage';
 
 function Dashboard() {
-  const [page, setPage] = useState('fleet');   // 'fleet' | 'students'
+  const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff'
   const [openBusId, setOpenBusId] = useState(null);
 
   function navigate(target) {
@@ -18,6 +19,8 @@ function Dashboard() {
   let body;
   if (page === 'students') {
     body = <StudentsPage />;
+  } else if (page === 'staff') {
+    body = <StaffPage />;
   } else if (openBusId) {
     body = <BusDetail busId={openBusId} onBack={() => setOpenBusId(null)} />;
   } else {
