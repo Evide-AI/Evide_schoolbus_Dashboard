@@ -1,0 +1,702 @@
+diff --git a/SETUP.md b/SETUP.md
+index 50f26b3..64e3090 100644
+--- a/SETUP.md
++++ b/SETUP.md
+@@ -106,8 +106,10 @@ production. What you run yourself is the live login against your Supabase
+ 
+ ## Notes on MVP scope
+ 
+-- **Bulk spreadsheet upload** is UI-only for now (as agreed) — it takes a file
+-  and shows the expected columns, but doesn't parse/commit yet.
++- **Bulk spreadsheet import** reads .xlsx/.csv in the browser, checks every
++  row (required fields, duplicate admission numbers, coordinates, bus
++  numbers) and inserts the valid rows. Available from the Students page and
++  from each bus page.
+ - **Notifications** write a row to the `notifications` table immediately;
+   turning those rows into phone push notifications is the backend dispatch
+   worker's job (parent app + FCM).
+diff --git a/src/components/BulkUploadModal.jsx b/src/components/BulkUploadModal.jsx
+index d185c3f..7657f02 100644
+--- a/src/components/BulkUploadModal.jsx
++++ b/src/components/BulkUploadModal.jsx
+@@ -1,46 +1,346 @@
+-import { useState } from 'react';
++import { useEffect, useMemo, useState } from 'react';
++import Papa from 'papaparse';
++import { readSheet } from 'read-excel-file/browser';
++import { supabase } from '../lib/supabase';
++import { regenerateBusRoute } from '../lib/api';
++import { rowsToRecords, validateRecords, normBusNumber, templateCsv } from '../lib/studentImport';
+ import Modal from './Modal';
+ 
+-// MVP: this is the upload UI only (as agreed) — it accepts a file and shows a
+-// preview affordance, but does not yet parse/commit rows. The parsing pipeline
+-// is a fast follow. Kept deliberately honest so a demo doesn't imply working
+-// import.
+-export default function BulkUploadModal({ onClose }) {
++const CHUNK = 200;
++const MAX_ROWS = 3000;
++
++function readCsv(file) {
++  return new Promise((resolve, reject) => {
++    Papa.parse(file, {
++      skipEmptyLines: 'greedy',
++      complete: (res) => resolve(res.data),
++      error: reject,
++    });
++  });
++}
++
++async function readFileRows(file) {
++  const name = file.name.toLowerCase();
++  if (name.endsWith('.csv')) return readCsv(file);
++  if (name.endsWith('.xlsx')) return readSheet(file);
++  if (name.endsWith('.xls')) {
++    throw new Error('Old .xls files are not supported. In Excel, use File → Save As → Excel Workbook (.xlsx) or CSV, then upload again.');
++  }
++  throw new Error('Please upload a .xlsx or .csv file.');
++}
++
++// Bulk student import.
++// - From a bus page: pass busId (+ busNumber). Every student goes onto that bus.
++// - From the Students page: omit busId. The user picks a bus for everyone,
++//   uses the "Bus" column from the file, or leaves students unassigned.
++export default function BulkUploadModal({ schoolId, busId = null, busNumber = null, onClose, onImported }) {
++  const fixedBus = Boolean(busId);
++
++  const [step, setStep] = useState('pick'); // pick | preview | importing | done
+   const [fileName, setFileName] = useState(null);
++  const [parsed, setParsed] = useState(null); // { records, hasBusColumn, hasCoordColumns }
++  const [error, setError] = useState(null);
++  const [reading, setReading] = useState(false);
++
++  // School data used for validation
++  const [buses, setBuses] = useState([]);
++  const [existingAdmissions, setExistingAdmissions] = useState(new Set());
++  const [countsByBus, setCountsByBus] = useState({});
++  const [schoolLoaded, setSchoolLoaded] = useState(false);
++
++  // Where the students go when importing from the Students page:
++  // 'column' | 'none' | <bus id>
++  const [target, setTarget] = useState('none');
++
++  const [progress, setProgress] = useState({ done: 0, total: 0 });
++  const [result, setResult] = useState(null); // { imported, failed: [{rowNumber, name, reason}] }
++
++  useEffect(() => {
++    let active = true;
++    (async () => {
++      const [{ data: b, error: e1 }, { data: s, error: e2 }] = await Promise.all([
++        supabase.from('buses').select('id, bus_number, seat_capacity').eq('school_id', schoolId).order('bus_number'),
++        supabase.from('students').select('admission_number, bus_id').eq('school_id', schoolId),
++      ]);
++      if (!active) return;
++      if (e1 || e2) { setError((e1 || e2).message); return; }
++      const counts = {};
++      for (const st of s || []) if (st.bus_id) counts[st.bus_id] = (counts[st.bus_id] || 0) + 1;
++      setBuses(b || []);
++      setExistingAdmissions(new Set((s || []).map((st) => String(st.admission_number).toLowerCase())));
++      setCountsByBus(counts);
++      setSchoolLoaded(true);
++    })();
++    return () => { active = false; };
++  }, [schoolId]);
++
++  const busesByNumber = useMemo(() => {
++    const m = new Map();
++    for (const b of buses) m.set(normBusNumber(b.bus_number), b.id);
++    return m;
++  }, [buses]);
++
++  const busMode = fixedBus ? 'fixed' : target === 'column' ? 'column' : target === 'none' ? 'none' : 'fixed';
++  const fixedBusId = fixedBus ? busId : (busMode === 'fixed' ? target : null);
++
++  const validated = useMemo(() => {
++    if (!parsed || !schoolLoaded) return [];
++    return validateRecords(parsed.records, { existingAdmissions, busesByNumber, busMode, fixedBusId });
++  }, [parsed, schoolLoaded, existingAdmissions, busesByNumber, busMode, fixedBusId]);
++
++  const ready = validated.filter((r) => r.ok);
++  const problems = validated.filter((r) => !r.ok);
++  const missingLocations = ready.filter((r) => !r.hasLocations).length;
++
++  // Seat-capacity warning (a warning only — the import still goes ahead).
++  const capacityWarnings = useMemo(() => {
++    const adding = {};
++    for (const r of ready) if (r.payload.bus_id) adding[r.payload.bus_id] = (adding[r.payload.bus_id] || 0) + 1;
++    return Object.entries(adding).flatMap(([id, n]) => {
++      const bus = buses.find((b) => b.id === id);
++      if (!bus?.seat_capacity) return [];
++      const total = (countsByBus[id] || 0) + n;
++      return total > bus.seat_capacity ? [`${bus.bus_number} will have ${total} students for ${bus.seat_capacity} seats`] : [];
++    });
++  }, [ready, buses, countsByBus]);
++
++  async function onPickFile(e) {
++    const file = e.target.files?.[0];
++    e.target.value = '';
++    if (!file) return;
++    setError(null);
++    setReading(true);
++    setFileName(file.name);
++    try {
++      const rows = await readFileRows(file);
++      const res = rowsToRecords(rows);
++      if (res.error) throw new Error(res.error);
++      if (res.records.length === 0) throw new Error('The file has a header row but no students under it.');
++      if (res.records.length > MAX_ROWS) throw new Error(`The file has ${res.records.length} rows. Please split it into files of up to ${MAX_ROWS} students.`);
++      setParsed(res);
++      if (!fixedBus) setTarget(res.hasBusColumn ? 'column' : 'none');
++      setStep('preview');
++    } catch (ex) {
++      setError(ex.message || 'Could not read this file.');
++      setParsed(null);
++      setStep('pick');
++    } finally {
++      setReading(false);
++    }
++  }
++
++  function downloadTemplate() {
++    const blob = new Blob([templateCsv()], { type: 'text/csv;charset=utf-8' });
++    const url = URL.createObjectURL(blob);
++    const a = document.createElement('a');
++    a.href = url;
++    a.download = 'evide-students-template.csv';
++    document.body.appendChild(a);
++    a.click();
++    a.remove();
++    URL.revokeObjectURL(url);
++  }
++
++  async function insertRows(rows) {
++    const payloads = rows.map((r) => ({ ...r.payload, school_id: schoolId }));
++    const { error: err } = await supabase.from('students').insert(payloads);
++    if (!err) return { imported: rows.length, failed: [] };
++
++    // The batch failed as a whole (e.g. someone added a student with the same
++    // admission number meanwhile). Retry one by one so the good rows still go in.
++    let imported = 0;
++    const failed = [];
++    for (const r of rows) {
++      const { error: e1 } = await supabase.from('students').insert({ ...r.payload, school_id: schoolId });
++      if (e1) {
++        failed.push({
++          rowNumber: r.rowNumber,
++          name: r.full_name,
++          reason: e1.code === '23505' ? 'Admission number already exists in your school' : e1.message,
++        });
++      } else {
++        imported++;
++      }
++    }
++    return { imported, failed };
++  }
++
++  async function runImport() {
++    setStep('importing');
++    setProgress({ done: 0, total: ready.length });
++    let imported = 0;
++    const failed = [];
++    for (let i = 0; i < ready.length; i += CHUNK) {
++      const chunk = ready.slice(i, i + CHUNK);
++      const res = await insertRows(chunk);
++      imported += res.imported;
++      failed.push(...res.failed);
++      setProgress({ done: Math.min(i + CHUNK, ready.length), total: ready.length });
++    }
++
++    // Rebuild routes for every bus that got new students (best-effort).
++    const touched = new Set(ready.map((r) => r.payload.bus_id).filter(Boolean));
++    touched.forEach((id) => regenerateBusRoute(id));
++
++    setResult({ imported, failed });
++    setStep('done');
++  }
++
++  function finish() {
++    if (result?.imported > 0) onImported?.();
++    else onClose();
++  }
++
++  const title = fixedBus ? `Import students to ${busNumber || 'this bus'}` : 'Import students';
+ 
+   return (
+-    <Modal title="Upload student spreadsheet" onClose={onClose} width={520}>
+-      <p className="muted bulk-intro">
+-        Upload an .xlsx or .csv with your student roster. Import processing is coming soon —
+-        for now, add students individually from the roster.
+-      </p>
+-
+-      <label className="bulk-drop" htmlFor="bulk-file">
+-        <div className="bulk-drop-icon">⬆</div>
+-        <div className="bulk-drop-text">
+-          {fileName ? <strong>{fileName}</strong> : 'Choose a spreadsheet file'}
++    <Modal title={title} onClose={step === 'importing' ? () => {} : (result?.imported ? finish : onClose)} width={600}>
++      {error && <div className="form-error">{error}</div>}
++
++      {step === 'pick' && (
++        <>
++          <p className="muted bulk-intro">
++            Upload a .xlsx or .csv file with one student per row. You'll see a check of every row before anything is saved.
++          </p>
++
++          <label className={`bulk-drop ${reading ? 'is-busy' : ''}`} htmlFor="bulk-file">
++            <div className="bulk-drop-icon">⬆</div>
++            <div className="bulk-drop-text">
++              {reading ? 'Reading file…' : fileName ? <strong>{fileName}</strong> : 'Choose a spreadsheet file'}
++            </div>
++            <div className="muted bulk-drop-hint">.xlsx or .csv</div>
++            <input id="bulk-file" type="file" accept=".xlsx,.csv,.xls" style={{ display: 'none' }}
++              onChange={onPickFile} disabled={reading} />
++          </label>
++
++          <div className="bulk-columns">
++            <div className="bulk-columns-label muted">Columns</div>
++            <code>
++              Name, Admission Number{fixedBus ? '' : ', Bus'}, Pickup Lat, Pickup Lng, Drop Lat, Drop Lng
++            </code>
++            <p className="muted form-hint">
++              Name and Admission Number are required. Locations can be added later.
++              {fixedBus ? ' Everyone in the file is added to this bus; a Bus column, if present, is ignored.' : ' Bus is optional — match it to the bus numbers in your fleet.'}
++            </p>
++          </div>
++
++          <div className="form-actions">
++            <button type="button" className="btn btn-secondary" onClick={downloadTemplate}>Download template</button>
++            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
++          </div>
++        </>
++      )}
++
++      {step === 'preview' && (
++        <>
++          <div className="bulk-file-row">
++            <span className="bulk-file-name">{fileName}</span>
++            <label className="linklike" htmlFor="bulk-file-again">Choose another file</label>
++            <input id="bulk-file-again" type="file" accept=".xlsx,.csv,.xls" style={{ display: 'none' }} onChange={onPickFile} />
++          </div>
++
++          {!fixedBus && (
++            <div className="form-field">
++              <label htmlFor="bulk-target">Assign to bus</label>
++              <select id="bulk-target" value={target} onChange={(e) => setTarget(e.target.value)}>
++                {parsed?.hasBusColumn && <option value="column">Use the Bus column in the file</option>}
++                <option value="none">Leave unassigned (assign later)</option>
++                {buses.map((b) => <option key={b.id} value={b.id}>All to {b.bus_number}</option>)}
++              </select>
++            </div>
++          )}
++
++          {!schoolLoaded ? (
++            <div className="muted loading-row">Checking against your school…</div>
++          ) : (
++            <>
++              <div className="bulk-summary">
++                <div className="bulk-stat bulk-stat-ok">
++                  <span className="bulk-stat-num">{ready.length}</span>
++                  <span className="bulk-stat-label">ready to import</span>
++                </div>
++                <div className={`bulk-stat ${problems.length ? 'bulk-stat-bad' : ''}`}>
++                  <span className="bulk-stat-num">{problems.length}</span>
++                  <span className="bulk-stat-label">need fixing</span>
++                </div>
++              </div>
++
++              {missingLocations > 0 && (
++                <p className="bulk-note">
++                  {missingLocations} student{missingLocations === 1 ? ' has' : 's have'} no pickup or drop location.
++                  They'll be imported, but won't appear on the bus route until you add locations.
++                </p>
++              )}
++              {capacityWarnings.map((w) => <p className="bulk-note bulk-note-warn" key={w}>{w}.</p>)}
++
++              {problems.length > 0 && (
++                <div className="bulk-problems">
++                  <div className="bulk-problems-head">
++                    These rows will be skipped. Fix them in the file and upload again, or import the rest now.
++                  </div>
++                  <ul>
++                    {problems.slice(0, 50).map((r) => (
++                      <li key={r.rowNumber}>
++                        <span className="bulk-problem-row">Row {r.rowNumber}</span>
++                        <span className="bulk-problem-text">
++                          {r.full_name || r.admission_number ? <strong>{r.full_name || r.admission_number}: </strong> : null}
++                          {r.problems.join('; ')}
++                        </span>
++                      </li>
++                    ))}
++                  </ul>
++                  {problems.length > 50 && <div className="muted bulk-more">…and {problems.length - 50} more</div>}
++                </div>
++              )}
++            </>
++          )}
++
++          <div className="form-actions">
++            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
++            <button type="button" className="btn btn-primary" onClick={runImport}
++              disabled={!schoolLoaded || ready.length === 0}>
++              Import {ready.length} student{ready.length === 1 ? '' : 's'}
++            </button>
++          </div>
++        </>
++      )}
++
++      {step === 'importing' && (
++        <div className="bulk-progress">
++          <p>Importing {progress.done} of {progress.total}…</p>
++          <div className="capacity-bar">
++            <div className="capacity-fill" style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }} />
++          </div>
++          <p className="muted form-hint">Keep this window open until it finishes.</p>
+         </div>
+-        <div className="muted bulk-drop-hint">.xlsx or .csv</div>
+-        <input
+-          id="bulk-file"
+-          type="file"
+-          accept=".xlsx,.csv"
+-          style={{ display: 'none' }}
+-          onChange={(e) => setFileName(e.target.files?.[0]?.name || null)}
+-        />
+-      </label>
+-
+-      <div className="bulk-columns">
+-        <div className="bulk-columns-label muted">Expected columns</div>
+-        <code>Name, Admission Number, Pickup Lat, Pickup Lng, Drop Lat, Drop Lng, Parent Phone</code>
+-      </div>
+-
+-      <div className="form-actions">
+-        <button type="button" className="btn btn-secondary" onClick={onClose}>Close</button>
+-        <button type="button" className="btn btn-primary" disabled title="Import processing coming soon">
+-          Import
+-        </button>
+-      </div>
++      )}
++
++      {step === 'done' && result && (
++        <>
++          <p className="notify-sent">
++            {result.imported > 0
++              ? <>Imported <strong>{result.imported}</strong> student{result.imported === 1 ? '' : 's'}.</>
++              : 'No students were imported.'}
++            {problems.length > 0 && ` ${problems.length} row${problems.length === 1 ? ' was' : 's were'} skipped because of errors in the file.`}
++          </p>
++          {result.failed.length > 0 && (
++            <div className="bulk-problems">
++              <div className="bulk-problems-head">These rows could not be saved:</div>
++              <ul>
++                {result.failed.map((f) => (
++                  <li key={f.rowNumber}>
++                    <span className="bulk-problem-row">Row {f.rowNumber}</span>
++                    <span className="bulk-problem-text"><strong>{f.name}: </strong>{f.reason}</span>
++                  </li>
++                ))}
++              </ul>
++            </div>
++          )}
++          <div className="form-actions">
++            <button type="button" className="btn btn-primary" onClick={finish}>Done</button>
++          </div>
++        </>
++      )}
+     </Modal>
+   );
+ }
+diff --git a/src/components/extras.css b/src/components/extras.css
+index 23d5434..50f6540 100644
+--- a/src/components/extras.css
++++ b/src/components/extras.css
+@@ -154,3 +154,49 @@ textarea:focus {
+ .roster-avatar img { width: 100%; height: 100%; object-fit: cover; }
+ .roster-avatar-initial { font-size: 0.9rem; font-weight: 650; color: var(--accent); }
+ .roster-name-cell { display: flex; align-items: center; gap: 0.7rem; }
++
++/* --- Bulk import --- */
++.bulk-drop.is-busy { opacity: 0.6; pointer-events: none; }
++.bulk-file-row {
++  display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
++  padding: 0.6rem 0.8rem; margin-bottom: 1.1rem;
++  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-sm);
++  font-size: 0.88rem;
++}
++.bulk-file-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.bulk-file-row .linklike { margin: 0; cursor: pointer; flex-shrink: 0; }
++.bulk-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; margin-bottom: 1rem; }
++.bulk-stat {
++  display: flex; flex-direction: column; gap: 0.2rem;
++  padding: 0.85rem 1rem; border: 1px solid var(--line); border-radius: var(--radius-sm);
++}
++.bulk-stat-num { font-size: 1.5rem; font-weight: 700; line-height: 1; }
++.bulk-stat-label { font-size: 0.8rem; color: var(--ink-faint); }
++.bulk-stat-ok .bulk-stat-num { color: var(--go); }
++.bulk-stat-bad { border-color: rgba(192,57,43,0.3); background: var(--stop-soft); }
++.bulk-stat-bad .bulk-stat-num { color: var(--stop); }
++.bulk-note { font-size: 0.85rem; line-height: 1.5; color: var(--ink-soft); margin-bottom: 0.8rem; }
++.bulk-note-warn { color: #9a6b00; background: var(--signal-soft); padding: 0.55rem 0.75rem; border-radius: var(--radius-sm); }
++.bulk-problems { border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 0.5rem; }
++.bulk-problems-head {
++  font-size: 0.82rem; font-weight: 600; color: var(--ink-soft);
++  padding: 0.6rem 0.8rem; background: var(--paper); border-bottom: 1px solid var(--line);
++}
++.bulk-problems ul { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; }
++.bulk-problems li {
++  display: flex; gap: 0.7rem; padding: 0.5rem 0.8rem;
++  font-size: 0.84rem; border-bottom: 1px solid var(--line);
++}
++.bulk-problems li:last-child { border-bottom: none; }
++.bulk-problem-row { flex-shrink: 0; width: 4.2rem; color: var(--ink-faint); }
++.bulk-problem-text { color: var(--ink-soft); min-width: 0; overflow-wrap: anywhere; }
++.bulk-more { font-size: 0.82rem; padding: 0.5rem 0.8rem; }
++.bulk-progress { padding: 0.5rem 0 0.8rem; }
++.bulk-progress p:first-child { font-size: 0.95rem; margin-bottom: 0.8rem; }
++
++.page-head-actions { display: flex; gap: 0.6rem; flex-shrink: 0; }
++
++@media (max-width: 720px) {
++  .page-head:has(.page-head-actions) { flex-direction: column; align-items: stretch; }
++  .page-head-actions .btn { flex: 1; }
++}
+diff --git a/src/lib/studentImport.js b/src/lib/studentImport.js
+new file mode 100644
+index 0000000..902617c
+--- /dev/null
++++ b/src/lib/studentImport.js
+@@ -0,0 +1,167 @@
++// Parsing + validation for bulk student import. Kept free of React and Supabase
++// so it can be tested on its own.
++
++// Header aliases, compared after lowercasing and stripping everything that
++// isn't a letter or digit ("Admission No." -> "admissionno").
++const HEADER_ALIASES = {
++  full_name: ['name', 'fullname', 'studentname', 'student', 'nameofstudent'],
++  admission_number: ['admissionnumber', 'admissionno', 'admno', 'admission', 'admnno', 'admnnumber', 'admissionnum'],
++  bus: ['bus', 'busnumber', 'busno', 'vehicle', 'vehiclenumber', 'vehicleno', 'busregistration', 'registrationnumber'],
++  pickup_lat: ['pickuplat', 'pickuplatitude'],
++  pickup_lng: ['pickuplng', 'pickuplong', 'pickuplon', 'pickuplongitude'],
++  drop_lat: ['droplat', 'droplatitude'],
++  drop_lng: ['droplng', 'droplong', 'droplon', 'droplongitude'],
++};
++
++export const TEMPLATE_HEADERS = ['Name', 'Admission Number', 'Bus', 'Pickup Lat', 'Pickup Lng', 'Drop Lat', 'Drop Lng'];
++
++function normHeader(v) {
++  return String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
++}
++
++// Bus numbers are compared without spaces/dashes and case-insensitively, so
++// "kl 10 aa-1111" matches "KL10AA1111".
++export function normBusNumber(v) {
++  return String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
++}
++
++function cellText(v) {
++  if (v === null || v === undefined) return '';
++  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(v);
++  return String(v).trim();
++}
++
++function isEmptyRow(row) {
++  return !row || row.every((c) => cellText(c) === '');
++}
++
++function mapHeaders(row) {
++  const map = {};
++  row.forEach((cell, idx) => {
++    const h = normHeader(cell);
++    if (!h) return;
++    for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
++      if (map[field] === undefined && aliases.includes(h)) { map[field] = idx; break; }
++    }
++  });
++  return map;
++}
++
++// rows: array of arrays (from CSV or xlsx). Finds the header row within the
++// first 10 non-empty rows and turns the rest into plain records.
++export function rowsToRecords(rows) {
++  let headerIdx = -1;
++  let colMap = null;
++  for (let i = 0; i < Math.min(rows.length, 15); i++) {
++    if (isEmptyRow(rows[i])) continue;
++    const m = mapHeaders(rows[i]);
++    if (m.full_name !== undefined && m.admission_number !== undefined) {
++      headerIdx = i; colMap = m; break;
++    }
++  }
++
++  if (headerIdx === -1) {
++    return {
++      error: 'Could not find the header row. The file needs at least a "Name" column and an "Admission Number" column.',
++      records: [],
++      hasBusColumn: false,
++      hasCoordColumns: false,
++    };
++  }
++
++  const records = [];
++  for (let i = headerIdx + 1; i < rows.length; i++) {
++    const row = rows[i];
++    if (isEmptyRow(row)) continue;
++    const get = (field) => (colMap[field] === undefined ? '' : cellText(row[colMap[field]]));
++    records.push({
++      rowNumber: i + 1, // spreadsheet row number, as the user sees it
++      full_name: get('full_name').replace(/\s+/g, ' '),
++      admission_number: get('admission_number'),
++      bus: get('bus'),
++      pickup_lat: get('pickup_lat'),
++      pickup_lng: get('pickup_lng'),
++      drop_lat: get('drop_lat'),
++      drop_lng: get('drop_lng'),
++    });
++  }
++
++  return {
++    error: null,
++    records,
++    hasBusColumn: colMap.bus !== undefined,
++    hasCoordColumns: ['pickup_lat', 'pickup_lng', 'drop_lat', 'drop_lng'].some((f) => colMap[f] !== undefined),
++  };
++}
++
++function parseCoord(text, min, max) {
++  if (text === '') return { value: null, ok: true };
++  const n = Number(text);
++  if (!Number.isFinite(n) || n < min || n > max) return { value: null, ok: false };
++  return { value: n, ok: true };
++}
++
++// Validates records and resolves each to an insert payload.
++// options:
++//   existingAdmissions: Set of admission numbers already in the school (normalised lowercase)
++//   busesByNumber: Map normBusNumber -> bus id
++//   busMode: 'fixed' | 'column' | 'none'
++//   fixedBusId: bus id used when busMode === 'fixed'
++export function validateRecords(records, { existingAdmissions, busesByNumber, busMode, fixedBusId }) {
++  const seen = new Map(); // admission (lowercase) -> first row number
++  return records.map((r) => {
++    const problems = [];
++
++    if (!r.full_name) problems.push('Name is empty');
++    if (!r.admission_number) problems.push('Admission number is empty');
++
++    const admKey = r.admission_number.toLowerCase();
++    if (r.admission_number) {
++      if (existingAdmissions.has(admKey)) {
++        problems.push('Admission number already exists in your school');
++      } else if (seen.has(admKey)) {
++        problems.push(`Same admission number as row ${seen.get(admKey)}`);
++      } else {
++        seen.set(admKey, r.rowNumber);
++      }
++    }
++
++    const pLat = parseCoord(r.pickup_lat, -90, 90);
++    const pLng = parseCoord(r.pickup_lng, -180, 180);
++    const dLat = parseCoord(r.drop_lat, -90, 90);
++    const dLng = parseCoord(r.drop_lng, -180, 180);
++    if (!pLat.ok || !pLng.ok) problems.push('Pickup location is not a valid latitude/longitude');
++    else if ((pLat.value === null) !== (pLng.value === null)) problems.push('Pickup needs both latitude and longitude');
++    if (!dLat.ok || !dLng.ok) problems.push('Drop location is not a valid latitude/longitude');
++    else if ((dLat.value === null) !== (dLng.value === null)) problems.push('Drop needs both latitude and longitude');
++
++    let busId = null;
++    if (busMode === 'fixed') {
++      busId = fixedBusId;
++    } else if (busMode === 'column' && r.bus) {
++      busId = busesByNumber.get(normBusNumber(r.bus)) || null;
++      if (!busId) problems.push(`Bus "${r.bus}" is not in your fleet`);
++    }
++
++    return {
++      ...r,
++      problems,
++      ok: problems.length === 0,
++      hasLocations: pLat.value !== null && dLat.value !== null,
++      payload: {
++        full_name: r.full_name,
++        admission_number: r.admission_number,
++        pickup_lat: pLat.value,
++        pickup_lng: pLng.value,
++        drop_lat: dLat.value,
++        drop_lng: dLng.value,
++        bus_id: busId,
++      },
++    };
++  });
++}
++
++export function templateCsv() {
++  const example = ['Anjali Menon', '1024', 'KL10AA1111', '10.9512', '76.0211', '10.9650', '76.0400'];
++  return `${TEMPLATE_HEADERS.join(',')}\n${example.join(',')}\n`;
++}
+diff --git a/src/pages/BusDetail.jsx b/src/pages/BusDetail.jsx
+index 6294838..f065104 100644
+--- a/src/pages/BusDetail.jsx
++++ b/src/pages/BusDetail.jsx
+@@ -212,7 +212,11 @@ export default function BusDetail({ busId, onBack }) {
+           onClose={() => setEditStudent(null)}
+           onSaved={() => { setEditStudent(null); load(); }} />
+       )}
+-      {bulk && <BulkUploadModal onClose={() => setBulk(false)} />}
++      {bulk && (
++        <BulkUploadModal schoolId={bus.school_id} busId={busId} busNumber={bus.bus_number}
++          onClose={() => setBulk(false)}
++          onImported={() => { setBulk(false); load(); }} />
++      )}
+       {notify && (
+         <NotifyModal busId={busId} busNumber={bus.bus_number} schoolId={bus.school_id}
+           onClose={() => setNotify(false)} />
+diff --git a/src/pages/StudentsPage.jsx b/src/pages/StudentsPage.jsx
+index 3fbea0d..c76fe34 100644
+--- a/src/pages/StudentsPage.jsx
++++ b/src/pages/StudentsPage.jsx
+@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
+ import { supabase } from '../lib/supabase';
+ import { useAuth } from '../lib/AuthContext';
+ import StudentFormModal from '../components/StudentFormModal';
++import BulkUploadModal from '../components/BulkUploadModal';
+ import ConfirmDialog from '../components/ConfirmDialog';
+ import './StudentsPage.css';
+ 
+@@ -16,6 +17,7 @@ export default function StudentsPage() {
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState(null);
+   const [addOpen, setAddOpen] = useState(false);
++  const [bulkOpen, setBulkOpen] = useState(false);
+   const [editStudent, setEditStudent] = useState(null);
+   const [confirmDelete, setConfirmDelete] = useState(null);
+ 
+@@ -80,7 +82,10 @@ export default function StudentsPage() {
+             {students.length} total{unassignedCount > 0 ? ` · ${unassignedCount} unassigned` : ''}
+           </p>
+         </div>
+-        <button className="btn btn-primary" onClick={() => setAddOpen(true)}>+ Add student</button>
++        <div className="page-head-actions">
++          <button className="btn btn-secondary" onClick={() => setBulkOpen(true)}>Import from spreadsheet</button>
++          <button className="btn btn-primary" onClick={() => setAddOpen(true)}>+ Add student</button>
++        </div>
+       </header>
+ 
+       {error && <div className="page-error">{error}</div>}
+@@ -99,7 +104,7 @@ export default function StudentsPage() {
+       ) : filtered.length === 0 ? (
+         <div className="empty-state card">
+           <h3>{query ? 'No students match your search' : 'No students yet'}</h3>
+-          {!query && <p className="muted">Add students here, then assign them to buses.</p>}
++          {!query && <p className="muted">Add students one by one, or import them all from a spreadsheet.</p>}
+         </div>
+       ) : (
+         <div className="students-table card">
+@@ -139,6 +144,11 @@ export default function StudentsPage() {
+           onClose={() => setAddOpen(false)}
+           onSaved={() => { setAddOpen(false); load(); }} />
+       )}
++      {bulkOpen && (
++        <BulkUploadModal schoolId={schoolId}
++          onClose={() => setBulkOpen(false)}
++          onImported={() => { setBulkOpen(false); load(); }} />
++      )}
+       {editStudent && (
+         <StudentFormModal student={editStudent} schoolId={schoolId} busId={editStudent.bus_id}
+           onClose={() => setEditStudent(null)}

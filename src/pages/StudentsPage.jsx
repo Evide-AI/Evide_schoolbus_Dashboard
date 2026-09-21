@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import StudentFormModal from '../components/StudentFormModal';
+import BulkUploadModal from '../components/BulkUploadModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import './StudentsPage.css';
 
@@ -16,6 +17,7 @@ export default function StudentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [editStudent, setEditStudent] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
@@ -80,7 +82,10 @@ export default function StudentsPage() {
             {students.length} total{unassignedCount > 0 ? ` · ${unassignedCount} unassigned` : ''}
           </p>
         </div>
-        <button className="btn btn-primary" onClick={() => setAddOpen(true)}>+ Add student</button>
+        <div className="page-head-actions">
+          <button className="btn btn-secondary" onClick={() => setBulkOpen(true)}>Import from spreadsheet</button>
+          <button className="btn btn-primary" onClick={() => setAddOpen(true)}>+ Add student</button>
+        </div>
       </header>
 
       {error && <div className="page-error">{error}</div>}
@@ -99,7 +104,7 @@ export default function StudentsPage() {
       ) : filtered.length === 0 ? (
         <div className="empty-state card">
           <h3>{query ? 'No students match your search' : 'No students yet'}</h3>
-          {!query && <p className="muted">Add students here, then assign them to buses.</p>}
+          {!query && <p className="muted">Add students one by one, or import them all from a spreadsheet.</p>}
         </div>
       ) : (
         <div className="students-table card">
@@ -138,6 +143,11 @@ export default function StudentsPage() {
         <StudentFormModal schoolId={schoolId} busId={null}
           onClose={() => setAddOpen(false)}
           onSaved={() => { setAddOpen(false); load(); }} />
+      )}
+      {bulkOpen && (
+        <BulkUploadModal schoolId={schoolId}
+          onClose={() => setBulkOpen(false)}
+          onImported={() => { setBulkOpen(false); load(); }} />
       )}
       {editStudent && (
         <StudentFormModal student={editStudent} schoolId={schoolId} busId={editStudent.bus_id}

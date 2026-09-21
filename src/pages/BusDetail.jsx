@@ -212,7 +212,11 @@ export default function BusDetail({ busId, onBack }) {
           onClose={() => setEditStudent(null)}
           onSaved={() => { setEditStudent(null); load(); }} />
       )}
-      {bulk && <BulkUploadModal onClose={() => setBulk(false)} />}
+      {bulk && (
+        <BulkUploadModal schoolId={bus.school_id} busId={busId} busNumber={bus.bus_number}
+          onClose={() => setBulk(false)}
+          onImported={() => { setBulk(false); load(); }} />
+      )}
       {notify && (
         <NotifyModal busId={busId} busNumber={bus.bus_number} schoolId={bus.school_id}
           onClose={() => setNotify(false)} />

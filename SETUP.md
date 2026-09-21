@@ -106,8 +106,10 @@ production. What you run yourself is the live login against your Supabase
 
 ## Notes on MVP scope
 
-- **Bulk spreadsheet upload** is UI-only for now (as agreed) — it takes a file
-  and shows the expected columns, but doesn't parse/commit yet.
+- **Bulk spreadsheet import** reads .xlsx/.csv in the browser, checks every
+  row (required fields, duplicate admission numbers, coordinates, bus
+  numbers) and inserts the valid rows. Available from the Students page and
+  from each bus page.
 - **Notifications** write a row to the `notifications` table immediately;
   turning those rows into phone push notifications is the backend dispatch
   worker's job (parent app + FCM).
