@@ -54,11 +54,51 @@
 .content { padding: 2rem 2.4rem; max-width: 1200px; width: 100%; }
 
 @media (max-width: 720px) {
-  .layout { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; flex-direction: row; align-items: center; padding: 0.8rem 1rem; }
-  .sidebar-brand { padding: 0; }
-  .sidebar-nav { display: none; }
-  .sidebar-foot { border-top: none; padding-top: 0; margin-left: auto; display: flex; align-items: center; gap: 0.8rem; }
-  .sidebar-signout { margin-top: 0; width: auto; }
-  .content { padding: 1.2rem; }
+  .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+
+  /* Compact top bar */
+  .sidebar {
+    position: sticky; top: 0; z-index: 30;
+    height: auto;
+    flex-direction: row; align-items: center; gap: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    padding-top: calc(0.6rem + env(safe-area-inset-top, 0px));
+  }
+  .sidebar-brand { padding: 0; flex-shrink: 0; }
+  .sidebar-logo { max-width: 104px; padding: 5px 8px; border-radius: 7px; }
+  .sidebar-foot {
+    border-top: none; padding-top: 0; margin-left: auto;
+    display: flex; align-items: center; gap: 0.6rem; min-width: 0;
+  }
+  .sidebar-school {
+    font-size: 0.85rem; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sidebar-user { display: none; }
+  .sidebar-signout { margin-top: 0; width: auto; flex-shrink: 0; }
+
+  /* Navigation becomes a bottom tab bar */
+  .sidebar-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    flex-direction: row; gap: 0;
+    background: var(--ink);
+    border-top: 1px solid rgba(255,255,255,0.1);
+    padding: 0.35rem 0.5rem;
+    padding-bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
+  }
+  .sidebar-nav-item {
+    flex: 1;
+    flex-direction: column; justify-content: center; gap: 0.2rem;
+    text-align: center;
+    font-size: 0.74rem;
+    padding: 0.45rem 0.3rem;
+    min-height: 52px;
+  }
+  .sidebar-nav-item svg { width: 22px; height: 22px; }
+
+  /* Leave room for the tab bar */
+  .content {
+    padding: 1.1rem 1rem;
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  }
 }

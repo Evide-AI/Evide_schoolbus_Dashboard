@@ -16,3 +16,11 @@
   margin-bottom: 1.2rem;
 }
 .form-hint { font-size: 0.82rem; margin-top: 0.35rem; }
+
+@media (max-width: 720px) {
+  .form-row { grid-template-columns: 1fr; gap: 0; }
+  .form-actions { flex-direction: column-reverse; gap: 0.5rem; }
+  .form-actions .btn { width: 100%; padding: 0.7rem; }
+  .photo-buttons { flex-wrap: wrap; }
+  .bulk-drop { padding: 1.4rem 1rem; }
+}

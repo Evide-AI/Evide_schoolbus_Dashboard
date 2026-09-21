@@ -121,3 +121,16 @@
 @media (max-width: 520px) {
   .summary-cards { grid-template-columns: 1fr 1fr; }
 }
+
+@media (max-width: 720px) {
+  .page-head { margin-bottom: 1.2rem; align-items: center; }
+  .page-head h1 { font-size: 1.3rem; }
+  .page-head p { font-size: 0.84rem; }
+  .page-head .btn { flex-shrink: 0; white-space: nowrap; }
+  .summary-strip { margin-bottom: 1.4rem; }
+  .summary-card { padding: 0.85rem; gap: 0.65rem; }
+  .summary-icon { width: 36px; height: 36px; }
+  .summary-value { font-size: 1.3rem; }
+  .bus-grid { grid-template-columns: 1fr; }
+  .bus-card:hover { transform: none; }
+}

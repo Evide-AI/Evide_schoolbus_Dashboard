@@ -37,4 +37,22 @@
 .modal-close:hover { color: var(--ink); }
 .modal-body { padding: 1.4rem; }
 
+@media (max-width: 720px) {
+  .modal-overlay { place-items: end stretch; padding: 0; }
+  .modal {
+    max-width: none !important;
+    max-height: 92vh;
+    border-radius: 14px 14px 0 0;
+    border-bottom: none;
+    animation-name: sheet-in;
+  }
+  .modal-head { padding: 0.95rem 1.1rem; z-index: 1; }
+  .modal-close { font-size: 1.8rem; padding: 0 0.4rem; min-width: 40px; min-height: 40px; }
+  .modal-body { padding: 1.1rem; padding-bottom: calc(1.1rem + env(safe-area-inset-bottom, 0px)); }
+}
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @media (prefers-reduced-motion: reduce) { .modal { animation: none; } }

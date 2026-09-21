@@ -33,7 +33,19 @@
 .bus-tag-free { background: var(--paper); color: var(--ink-faint); }
 
 @media (max-width: 720px) {
-  .students-row { grid-template-columns: 1.6fr auto; }
-  .students-row span:nth-child(2),
-  .students-row span:nth-child(3) { display: none; }
+  .students-search { max-width: none; }
+  .students-row-head { display: none; }
+  .students-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "name bus"
+      "adm  actions";
+    gap: 0.35rem 0.75rem;
+    padding: 0.85rem 1rem;
+  }
+  .students-row > :nth-child(1) { grid-area: name; min-width: 0; }
+  .students-row > :nth-child(2) { grid-area: adm; padding-left: calc(34px + 0.7rem); font-size: 0.82rem; }
+  .students-row > :nth-child(3) { grid-area: bus; justify-self: end; }
+  .students-row > :nth-child(4) { grid-area: actions; }
+  .students-name-cell .roster-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }

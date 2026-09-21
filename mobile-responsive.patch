@@ -1,0 +1,217 @@
+diff --git a/index.html b/index.html
+index 7faa0bb..179708c 100644
+--- a/index.html
++++ b/index.html
+@@ -3,7 +3,8 @@
+   <head>
+     <meta charset="UTF-8" />
+     <link rel="icon" type="image/png" href="/evide-logo.png" />
+-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
++    <meta name="theme-color" content="#202B49" />
+     <title>Evide School Bus — Management</title>
+   </head>
+   <body>
+diff --git a/src/components/Layout.css b/src/components/Layout.css
+index f3e67f9..1d468f9 100644
+--- a/src/components/Layout.css
++++ b/src/components/Layout.css
+@@ -54,11 +54,51 @@
+ .content { padding: 2rem 2.4rem; max-width: 1200px; width: 100%; }
+ 
+ @media (max-width: 720px) {
+-  .layout { grid-template-columns: 1fr; }
+-  .sidebar { position: static; height: auto; flex-direction: row; align-items: center; padding: 0.8rem 1rem; }
+-  .sidebar-brand { padding: 0; }
+-  .sidebar-nav { display: none; }
+-  .sidebar-foot { border-top: none; padding-top: 0; margin-left: auto; display: flex; align-items: center; gap: 0.8rem; }
+-  .sidebar-signout { margin-top: 0; width: auto; }
+-  .content { padding: 1.2rem; }
++  .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
++
++  /* Compact top bar */
++  .sidebar {
++    position: sticky; top: 0; z-index: 30;
++    height: auto;
++    flex-direction: row; align-items: center; gap: 0.75rem;
++    padding: 0.6rem 0.9rem;
++    padding-top: calc(0.6rem + env(safe-area-inset-top, 0px));
++  }
++  .sidebar-brand { padding: 0; flex-shrink: 0; }
++  .sidebar-logo { max-width: 104px; padding: 5px 8px; border-radius: 7px; }
++  .sidebar-foot {
++    border-top: none; padding-top: 0; margin-left: auto;
++    display: flex; align-items: center; gap: 0.6rem; min-width: 0;
++  }
++  .sidebar-school {
++    font-size: 0.85rem; min-width: 0;
++    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
++  }
++  .sidebar-user { display: none; }
++  .sidebar-signout { margin-top: 0; width: auto; flex-shrink: 0; }
++
++  /* Navigation becomes a bottom tab bar */
++  .sidebar-nav {
++    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
++    flex-direction: row; gap: 0;
++    background: var(--ink);
++    border-top: 1px solid rgba(255,255,255,0.1);
++    padding: 0.35rem 0.5rem;
++    padding-bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
++  }
++  .sidebar-nav-item {
++    flex: 1;
++    flex-direction: column; justify-content: center; gap: 0.2rem;
++    text-align: center;
++    font-size: 0.74rem;
++    padding: 0.45rem 0.3rem;
++    min-height: 52px;
++  }
++  .sidebar-nav-item svg { width: 22px; height: 22px; }
++
++  /* Leave room for the tab bar */
++  .content {
++    padding: 1.1rem 1rem;
++    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
++  }
+ }
+diff --git a/src/components/Modal.css b/src/components/Modal.css
+index c9b3a4e..8cd932a 100644
+--- a/src/components/Modal.css
++++ b/src/components/Modal.css
+@@ -37,4 +37,22 @@
+ .modal-close:hover { color: var(--ink); }
+ .modal-body { padding: 1.4rem; }
+ 
++@media (max-width: 720px) {
++  .modal-overlay { place-items: end stretch; padding: 0; }
++  .modal {
++    max-width: none !important;
++    max-height: 92vh;
++    border-radius: 14px 14px 0 0;
++    border-bottom: none;
++    animation-name: sheet-in;
++  }
++  .modal-head { padding: 0.95rem 1.1rem; z-index: 1; }
++  .modal-close { font-size: 1.8rem; padding: 0 0.4rem; min-width: 40px; min-height: 40px; }
++  .modal-body { padding: 1.1rem; padding-bottom: calc(1.1rem + env(safe-area-inset-bottom, 0px)); }
++}
++@keyframes sheet-in {
++  from { opacity: 0; transform: translateY(24px); }
++  to { opacity: 1; transform: translateY(0); }
++}
++
+ @media (prefers-reduced-motion: reduce) { .modal { animation: none; } }
+diff --git a/src/components/forms.css b/src/components/forms.css
+index 5538608..1d96f50 100644
+--- a/src/components/forms.css
++++ b/src/components/forms.css
+@@ -16,3 +16,11 @@
+   margin-bottom: 1.2rem;
+ }
+ .form-hint { font-size: 0.82rem; margin-top: 0.35rem; }
++
++@media (max-width: 720px) {
++  .form-row { grid-template-columns: 1fr; gap: 0; }
++  .form-actions { flex-direction: column-reverse; gap: 0.5rem; }
++  .form-actions .btn { width: 100%; padding: 0.7rem; }
++  .photo-buttons { flex-wrap: wrap; }
++  .bulk-drop { padding: 1.4rem 1rem; }
++}
+diff --git a/src/index.css b/src/index.css
+index b587a3d..4e85299 100644
+--- a/src/index.css
++++ b/src/index.css
+@@ -94,3 +94,8 @@ label { display: block; font-size: 0.78rem; font-weight: 550; color: var(--ink-s
+   gap: 1rem;
+ }
+ .app-loading-error { color: var(--stop); text-align: center; padding: 2rem; }
++
++@media (max-width: 720px) {
++  input, select, textarea { font-size: 16px; }
++  .btn-sm { min-height: 36px; }
++}
+diff --git a/src/pages/BusDetail.css b/src/pages/BusDetail.css
+index a14e2e2..7d68aa2 100644
+--- a/src/pages/BusDetail.css
++++ b/src/pages/BusDetail.css
+@@ -60,9 +60,26 @@
+ .set-dot-ok { background: var(--go); }
+ 
+ @media (max-width: 720px) {
+-  .detail-stats { grid-template-columns: 1fr; }
+-  .roster-row { grid-template-columns: 1fr auto; }
+-  .roster-row span:nth-child(2),
+-  .roster-row span:nth-child(3),
+-  .roster-row span:nth-child(4) { display: none; }
++  .detail-head { flex-direction: column; align-items: stretch; }
++  .detail-head-main h1 { font-size: 1.35rem; }
++  .detail-head-actions { flex-wrap: wrap; }
++  .detail-head-actions .btn { flex: 1 1 calc(50% - 0.3rem); }
++
++  .detail-stats { grid-template-columns: repeat(3, 1fr); gap: 0.6rem; }
++  .detail-stat { padding: 0.9rem 0.8rem; }
++  .detail-stat .stat-num { font-size: 1.4rem; }
++  .detail-stat .stat-label { font-size: 0.74rem; }
++
++  .roster-head { flex-direction: column; align-items: stretch; gap: 0.75rem; }
++  .roster-actions { flex-wrap: wrap; }
++  .roster-actions .btn { flex: 1 1 auto; }
++  .roster-actions .btn-primary { flex-basis: 100%; order: -1; padding: 0.6rem; font-size: 0.9rem; }
++
++  .roster-row { grid-template-columns: 1fr auto; padding: 0.8rem 1rem; }
++  .roster-row-head { display: none; }
++  .roster-row > :nth-child(2),
++  .roster-row > :nth-child(3),
++  .roster-row > :nth-child(4) { display: none; }
++  .roster-name-cell { min-width: 0; }
++  .roster-name-cell .roster-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ }
+diff --git a/src/pages/BusList.css b/src/pages/BusList.css
+index a1110c6..a295cd7 100644
+--- a/src/pages/BusList.css
++++ b/src/pages/BusList.css
+@@ -121,3 +121,16 @@
+ @media (max-width: 520px) {
+   .summary-cards { grid-template-columns: 1fr 1fr; }
+ }
++
++@media (max-width: 720px) {
++  .page-head { margin-bottom: 1.2rem; align-items: center; }
++  .page-head h1 { font-size: 1.3rem; }
++  .page-head p { font-size: 0.84rem; }
++  .page-head .btn { flex-shrink: 0; white-space: nowrap; }
++  .summary-strip { margin-bottom: 1.4rem; }
++  .summary-card { padding: 0.85rem; gap: 0.65rem; }
++  .summary-icon { width: 36px; height: 36px; }
++  .summary-value { font-size: 1.3rem; }
++  .bus-grid { grid-template-columns: 1fr; }
++  .bus-card:hover { transform: none; }
++}
+diff --git a/src/pages/StudentsPage.css b/src/pages/StudentsPage.css
+index d82caef..a796674 100644
+--- a/src/pages/StudentsPage.css
++++ b/src/pages/StudentsPage.css
+@@ -33,7 +33,19 @@
+ .bus-tag-free { background: var(--paper); color: var(--ink-faint); }
+ 
+ @media (max-width: 720px) {
+-  .students-row { grid-template-columns: 1.6fr auto; }
+-  .students-row span:nth-child(2),
+-  .students-row span:nth-child(3) { display: none; }
++  .students-search { max-width: none; }
++  .students-row-head { display: none; }
++  .students-row {
++    grid-template-columns: 1fr auto;
++    grid-template-areas:
++      "name bus"
++      "adm  actions";
++    gap: 0.35rem 0.75rem;
++    padding: 0.85rem 1rem;
++  }
++  .students-row > :nth-child(1) { grid-area: name; min-width: 0; }
++  .students-row > :nth-child(2) { grid-area: adm; padding-left: calc(34px + 0.7rem); font-size: 0.82rem; }
++  .students-row > :nth-child(3) { grid-area: bus; justify-self: end; }
++  .students-row > :nth-child(4) { grid-area: actions; }
++  .students-name-cell .roster-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ }

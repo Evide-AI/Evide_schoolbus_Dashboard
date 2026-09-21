@@ -60,9 +60,26 @@
 .set-dot-ok { background: var(--go); }
 
 @media (max-width: 720px) {
-  .detail-stats { grid-template-columns: 1fr; }
-  .roster-row { grid-template-columns: 1fr auto; }
-  .roster-row span:nth-child(2),
-  .roster-row span:nth-child(3),
-  .roster-row span:nth-child(4) { display: none; }
+  .detail-head { flex-direction: column; align-items: stretch; }
+  .detail-head-main h1 { font-size: 1.35rem; }
+  .detail-head-actions { flex-wrap: wrap; }
+  .detail-head-actions .btn { flex: 1 1 calc(50% - 0.3rem); }
+
+  .detail-stats { grid-template-columns: repeat(3, 1fr); gap: 0.6rem; }
+  .detail-stat { padding: 0.9rem 0.8rem; }
+  .detail-stat .stat-num { font-size: 1.4rem; }
+  .detail-stat .stat-label { font-size: 0.74rem; }
+
+  .roster-head { flex-direction: column; align-items: stretch; gap: 0.75rem; }
+  .roster-actions { flex-wrap: wrap; }
+  .roster-actions .btn { flex: 1 1 auto; }
+  .roster-actions .btn-primary { flex-basis: 100%; order: -1; padding: 0.6rem; font-size: 0.9rem; }
+
+  .roster-row { grid-template-columns: 1fr auto; padding: 0.8rem 1rem; }
+  .roster-row-head { display: none; }
+  .roster-row > :nth-child(2),
+  .roster-row > :nth-child(3),
+  .roster-row > :nth-child(4) { display: none; }
+  .roster-name-cell { min-width: 0; }
+  .roster-name-cell .roster-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }

@@ -94,3 +94,8 @@ label { display: block; font-size: 0.78rem; font-weight: 550; color: var(--ink-s
   gap: 1rem;
 }
 .app-loading-error { color: var(--stop); text-align: center; padding: 2rem; }
+
+@media (max-width: 720px) {
+  input, select, textarea { font-size: 16px; }
+  .btn-sm { min-height: 36px; }
+}
