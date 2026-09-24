@@ -32,6 +32,12 @@ export default function Layout({ current, onNavigate, pendingRequests = 0, child
             <WheelIcon /> <span className="nav-long">Drivers &amp; conductors</span><span className="nav-short">Drivers</span>
           </button>
           <button
+            className={`sidebar-nav-item ${current === 'messages' ? 'active' : ''}`}
+            onClick={() => onNavigate('messages')}
+          >
+            <MessageIcon /> Messages
+          </button>
+          <button
             className={`sidebar-nav-item ${current === 'parents' ? 'active' : ''}`}
             onClick={() => onNavigate('parents')}
           >
@@ -89,6 +95,14 @@ function ParentIcon() {
       <circle cx="9" cy="8" r="3.2" />
       <path d="M3.5 20v-1.4A4.6 4.6 0 018 14h2a4.6 4.6 0 014.5 4.6V20" />
       <path d="M16.5 11.5a2.4 2.4 0 100-4.8 2.4 2.4 0 000 4.8M20.5 20v-1.2a3.6 3.6 0 00-3-3.5" />
+    </svg>
+  );
+}
+
+function MessageIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M21 11.5a8.4 8.4 0 01-9 8.4 9.9 9.9 0 01-2.8-.4L3 21l1.5-4.2A8.1 8.1 0 013 11.5 8.4 8.4 0 0112 3a8.4 8.4 0 019 8.5z" />
     </svg>
   );
 }

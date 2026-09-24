@@ -4,8 +4,18 @@
 -- ------------------------------------------------------- parent columns
 -- The dashboard stores a parent's name and mobile number on their row.
 -- Added only if your table doesn't have them already.
+alter table parent_users add column if not exists school_id uuid references schools(id) on delete cascade;
 alter table parent_users add column if not exists full_name text;
 alter table parent_users add column if not exists phone text;
+
+-- Existing parents get their school from the students they're linked to.
+update parent_users p
+set school_id = s.school_id
+from parent_student_links l
+join students s on s.id = l.student_id
+where l.parent_user_id = p.id and p.school_id is null;
+
+create index if not exists idx_parent_users_school on parent_users(school_id);
 
 -- ---------------------------------------------------------------- requests
 create table if not exists password_reset_requests (

@@ -7,11 +7,12 @@ import BusDetail from './pages/BusDetail';
 import StudentsPage from './pages/StudentsPage';
 import StaffPage from './pages/StaffPage';
 import ParentsPage from './pages/ParentsPage';
+import MessagesPage from './pages/MessagesPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import { supabase } from './lib/supabase';
 
 function Dashboard() {
-  const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff' | 'parents'
+  const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff' | 'parents' | 'messages'
   const [openBusId, setOpenBusId] = useState(null);
 
   // Count of parents waiting for a password reset, shown as a badge on the
@@ -44,6 +45,8 @@ function Dashboard() {
     body = <StaffPage />;
   } else if (page === 'parents') {
     body = <ParentsPage />;
+  } else if (page === 'messages') {
+    body = <MessagesPage />;
   } else if (openBusId) {
     body = <BusDetail busId={openBusId} onBack={() => setOpenBusId(null)} />;
   } else {
