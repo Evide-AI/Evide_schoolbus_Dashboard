@@ -1,0 +1,26 @@
+diff a/src/pages/StaffPage.jsx b/src/pages/StaffPage.jsx	(rejected hunks)
+@@ -38,7 +38,14 @@ export default function StaffPage() {
+       supabase.from('buses').select('id, bus_number').eq('school_id', schoolId).eq('is_active', true).order('bus_number'),
+     ]);
+     if (e1 || e2) { setError((e1 || e2).message); setLoading(false); return; }
+-    setStaff(s || []);
++    // Older rows (created before this page existed) may have no name/role yet.
++    setStaff((s || []).map((row) => ({
++      ...row,
++      name_missing: !(row.full_name || '').trim(),
++      full_name: (row.full_name || '').trim() || 'Name not set',
++      role: row.role === 'conductor' ? 'conductor' : 'driver',
++      is_active: row.is_active !== false,
++    })));
+     setBuses(b || []);
+     setLoading(false);
+   }, [schoolId]);
+@@ -60,7 +67,7 @@ export default function StaffPage() {
+     const qDigits = q.replace(/\D/g, '');
+     return staff.filter((s) =>
+       (filter === 'all' || s.role === filter) &&
+-      (!q || s.full_name.toLowerCase().includes(q) || (qDigits && String(s.phone || '').includes(qDigits))));
++      (!q || String(s.full_name || '').toLowerCase().includes(q) || (qDigits && String(s.phone || '').includes(qDigits))));
+   }, [staff, filter, query]);
+ 
+   function handleSaved(row, password, isReset = false) {

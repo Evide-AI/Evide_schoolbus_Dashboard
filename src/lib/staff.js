@@ -20,7 +20,7 @@ export async function staffAction(action, payload = {}) {
   return data;
 }
 
-export const ROLE_LABEL = { driver: 'Driver', conductor: 'Conductor' };
+export const ROLE_LABEL = { driver: 'Driver', conductor: 'Conductor', parent: 'Parent' };
 
 // Same rules as the Edge Function, for instant feedback in the form.
 export function normalizePhone(input) {

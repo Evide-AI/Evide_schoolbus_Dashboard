@@ -10,9 +10,16 @@ export default function CredentialsModal({ staff, password, isReset = false, onC
   const [copied, setCopied] = useState(false);
   const role = ROLE_LABEL[staff.role] || 'Staff';
 
+  // Parents added with their own email sign in with that; everyone else signs
+  // in with their phone number.
+  const signInWith = staff.email && !staff.email.endsWith('.evide.in')
+    ? staff.email
+    : formatPhone(staff.phone);
+  const signInLabel = signInWith === staff.email ? 'Email' : 'Phone';
+
   const message =
     `Hi ${staff.full_name}, here is your Evide School Bus ${role.toLowerCase()} app login.\n\n` +
-    `Phone: ${formatPhone(staff.phone)}\nPassword: ${password}` +
+    `${signInLabel}: ${signInWith}\nPassword: ${password}` +
     (APP_URL ? `\n\nDownload the app: ${APP_URL}` : '');
 
   async function copy() {
@@ -36,8 +43,8 @@ export default function CredentialsModal({ staff, password, isReset = false, onC
 
       <div className="cred-card">
         <div className="cred-line">
-          <span className="cred-label">Phone</span>
-          <span className="cred-value">{formatPhone(staff.phone)}</span>
+          <span className="cred-label">{signInLabel}</span>
+          <span className="cred-value">{signInWith}</span>
         </div>
         <div className="cred-line">
           <span className="cred-label">Password</span>

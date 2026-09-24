@@ -1,0 +1,10 @@
+diff a/src/components/StaffFormModal.jsx b/src/components/StaffFormModal.jsx	(rejected hunks)
+@@ -7,7 +7,7 @@ import { staffAction, normalizePhone, localDigits, ROLE_LABEL } from '../lib/sta
+ // onSaved(staffRow, password?) — password is set when a login was created or reset.
+ export default function StaffFormModal({ staff, buses, crewByBus, onClose, onSaved, onRemoved }) {
+   const isEdit = Boolean(staff);
+-  const [fullName, setFullName] = useState(staff?.full_name || '');
++  const [fullName, setFullName] = useState(staff?.name_missing ? '' : (staff?.full_name || ''));
+   const [phone, setPhone] = useState(localDigits(staff?.phone));
+   const [role, setRole] = useState(staff?.role || 'driver');
+   const [busId, setBusId] = useState(staff?.bus_id || '');

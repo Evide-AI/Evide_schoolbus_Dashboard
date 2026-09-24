@@ -1,0 +1,62 @@
+.request-panel { padding: 1rem 1.2rem; margin-bottom: 1.4rem; border-left: 3px solid var(--signal); }
+.request-panel-head { display: flex; align-items: flex-start; gap: 0.8rem; margin-bottom: 0.9rem; }
+.request-panel-head h2 { font-size: 1.02rem; margin-bottom: 0.15rem; }
+.request-panel-head p { font-size: 0.85rem; }
+.request-badge {
+  display: grid; place-items: center; flex-shrink: 0;
+  min-width: 26px; height: 26px; padding: 0 0.4rem;
+  border-radius: 999px; background: var(--signal); color: var(--ink);
+  font-size: 0.85rem; font-weight: 700;
+}
+.request-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 0.7rem 0; border-top: 1px solid var(--line);
+}
+.request-main { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.request-name { font-weight: 600; font-size: 0.92rem; }
+.request-meta { font-size: 0.82rem; }
+.request-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+
+.parent-row { grid-template-columns: 1.6fr 1.2fr 1.6fr 0.9fr auto; }
+.parent-children { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+.child-picker {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  max-height: 210px; overflow-y: auto;
+}
+.child-option {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0.75rem; cursor: pointer; font-size: 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+.child-option:last-child { border-bottom: none; }
+.child-option:hover { background: var(--paper); }
+.child-option.is-on { background: #eaf1fe; }
+.child-option input { width: auto; margin: 0; }
+.child-option-name { font-weight: 550; }
+.child-option-adm { font-size: 0.82rem; margin-left: auto; }
+
+@media (max-width: 720px) {
+  .request-row { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+  .request-actions .btn { flex: 1; }
+  .parent-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "name    actions"
+      "phone   actions"
+      "kids    kids"
+      "status  status";
+    gap: 0.3rem 0.75rem;
+  }
+  .parent-row > :nth-child(1) { grid-area: name; }
+  .parent-row > :nth-child(2) { grid-area: phone; padding-left: calc(34px + 0.7rem); }
+  .parent-row > :nth-child(3) {
+    grid-area: kids; justify-self: stretch;
+    padding-left: calc(34px + 0.7rem);
+    flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px;
+  }
+  .parent-row > :nth-child(4) { grid-area: status; padding-left: calc(34px + 0.7rem); }
+  .parent-row > :nth-child(5) { grid-area: actions; align-self: start; }
+  .parent-children .bus-tag { white-space: nowrap; }
+}

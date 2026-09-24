@@ -1,0 +1,1351 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 7a6a790..32be6a7 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -1,4 +1,4 @@
+-import { useState } from 'react';
++import { useCallback, useEffect, useState } from 'react';
+ import { AuthProvider, useAuth } from './lib/AuthContext';
+ import Login from './pages/Login';
+ import Layout from './components/Layout';
+@@ -6,11 +6,32 @@ import BusList from './pages/BusList';
+ import BusDetail from './pages/BusDetail';
+ import StudentsPage from './pages/StudentsPage';
+ import StaffPage from './pages/StaffPage';
++import ParentsPage from './pages/ParentsPage';
++import ErrorBoundary from './components/ErrorBoundary';
++import { supabase } from './lib/supabase';
+ 
+ function Dashboard() {
+-  const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff'
++  const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff' | 'parents'
+   const [openBusId, setOpenBusId] = useState(null);
+ 
++  // Count of parents waiting for a password reset, shown as a badge on the
++  // Parents tab so the office notices without opening the page.
++  const [pendingRequests, setPendingRequests] = useState(0);
++
++  const loadPending = useCallback(async () => {
++    const { count } = await supabase
++      .from('password_reset_requests')
++      .select('id', { count: 'exact', head: true })
++      .eq('status', 'pending');
++    setPendingRequests(count || 0);
++  }, []);
++
++  useEffect(() => {
++    loadPending();
++    const timer = setInterval(loadPending, 120000); // every 2 minutes
++    return () => clearInterval(timer);
++  }, [loadPending, page]);
++
+   function navigate(target) {
+     setOpenBusId(null); // leaving a bus detail when switching sections
+     setPage(target);
+@@ -21,6 +42,8 @@ function Dashboard() {
+     body = <StudentsPage />;
+   } else if (page === 'staff') {
+     body = <StaffPage />;
++  } else if (page === 'parents') {
++    body = <ParentsPage />;
+   } else if (openBusId) {
+     body = <BusDetail busId={openBusId} onBack={() => setOpenBusId(null)} />;
+   } else {
+@@ -28,8 +51,8 @@ function Dashboard() {
+   }
+ 
+   return (
+-    <Layout current={page} onNavigate={navigate}>
+-      {body}
++    <Layout current={page} onNavigate={navigate} pendingRequests={pendingRequests}>
++      <ErrorBoundary resetKey={`${page}:${openBusId || ''}`}>{body}</ErrorBoundary>
+     </Layout>
+   );
+ }
+diff --git a/src/components/CredentialsModal.jsx b/src/components/CredentialsModal.jsx
+index 45493ec..4165131 100644
+--- a/src/components/CredentialsModal.jsx
++++ b/src/components/CredentialsModal.jsx
+@@ -10,9 +10,16 @@ export default function CredentialsModal({ staff, password, isReset = false, onC
+   const [copied, setCopied] = useState(false);
+   const role = ROLE_LABEL[staff.role] || 'Staff';
+ 
++  // Parents added with their own email sign in with that; everyone else signs
++  // in with their phone number.
++  const signInWith = staff.email && !staff.email.endsWith('.evide.in')
++    ? staff.email
++    : formatPhone(staff.phone);
++  const signInLabel = signInWith === staff.email ? 'Email' : 'Phone';
++
+   const message =
+     `Hi ${staff.full_name}, here is your Evide School Bus ${role.toLowerCase()} app login.\n\n` +
+-    `Phone: ${formatPhone(staff.phone)}\nPassword: ${password}` +
++    `${signInLabel}: ${signInWith}\nPassword: ${password}` +
+     (APP_URL ? `\n\nDownload the app: ${APP_URL}` : '');
+ 
+   async function copy() {
+@@ -36,8 +43,8 @@ export default function CredentialsModal({ staff, password, isReset = false, onC
+ 
+       <div className="cred-card">
+         <div className="cred-line">
+-          <span className="cred-label">Phone</span>
+-          <span className="cred-value">{formatPhone(staff.phone)}</span>
++          <span className="cred-label">{signInLabel}</span>
++          <span className="cred-value">{signInWith}</span>
+         </div>
+         <div className="cred-line">
+           <span className="cred-label">Password</span>
+diff --git a/src/components/ErrorBoundary.jsx b/src/components/ErrorBoundary.jsx
+new file mode 100644
+index 0000000..697f224
+--- /dev/null
++++ b/src/components/ErrorBoundary.jsx
+@@ -0,0 +1,35 @@
++import { Component } from 'react';
++
++// Shows a readable message instead of a blank white screen if a page crashes.
++export default class ErrorBoundary extends Component {
++  constructor(props) {
++    super(props);
++    this.state = { error: null };
++  }
++
++  static getDerivedStateFromError(error) {
++    return { error };
++  }
++
++  componentDidCatch(error, info) {
++    console.error('Page crashed:', error, info?.componentStack);
++  }
++
++  componentDidUpdate(prevProps) {
++    // Clear the error when the user switches to another page.
++    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
++      this.setState({ error: null });
++    }
++  }
++
++  render() {
++    if (!this.state.error) return this.props.children;
++    return (
++      <div className="empty-state card">
++        <h3>This page couldn't load</h3>
++        <p className="muted">{String(this.state.error?.message || this.state.error)}</p>
++        <button className="btn btn-secondary" onClick={() => window.location.reload()}>Reload page</button>
++      </div>
++    );
++  }
++}
+diff --git a/src/components/Layout.css b/src/components/Layout.css
+index 30b24af..c659338 100644
+--- a/src/components/Layout.css
++++ b/src/components/Layout.css
+@@ -41,6 +41,13 @@
+ .sidebar-nav-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+ .sidebar-nav-item.active { background: rgba(255,255,255,0.12); color: #fff; }
+ .nav-short { display: none; }
++.nav-badge {
++  margin-left: auto;
++  min-width: 20px; height: 20px; padding: 0 0.35rem;
++  display: grid; place-items: center;
++  border-radius: 999px; background: var(--signal); color: var(--ink);
++  font-size: 0.74rem; font-weight: 700;
++}
+ 
+ .sidebar-foot { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem; }
+ .sidebar-school { font-size: 0.92rem; font-weight: 600; }
+@@ -97,6 +104,8 @@
+   }
+   .sidebar-nav-item svg { width: 22px; height: 22px; }
+   .nav-long { display: none; }
++  .nav-badge { position: absolute; top: 2px; right: 50%; margin-right: -22px; }
++  .sidebar-nav-item { position: relative; }
+   .nav-short { display: inline; }
+ 
+   /* Leave room for the tab bar */
+diff --git a/src/components/Layout.jsx b/src/components/Layout.jsx
+index 9e46f4e..7737218 100644
+--- a/src/components/Layout.jsx
++++ b/src/components/Layout.jsx
+@@ -1,7 +1,7 @@
+ import { useAuth } from '../lib/AuthContext';
+ import './Layout.css';
+ 
+-export default function Layout({ current, onNavigate, children }) {
++export default function Layout({ current, onNavigate, pendingRequests = 0, children }) {
+   const { managementUser, signOut } = useAuth();
+   const school = managementUser?.schools;
+ 
+@@ -31,6 +31,13 @@ export default function Layout({ current, onNavigate, children }) {
+           >
+             <WheelIcon /> <span className="nav-long">Drivers &amp; conductors</span><span className="nav-short">Drivers</span>
+           </button>
++          <button
++            className={`sidebar-nav-item ${current === 'parents' ? 'active' : ''}`}
++            onClick={() => onNavigate('parents')}
++          >
++            <ParentIcon /> Parents
++            {pendingRequests > 0 && <span className="nav-badge">{pendingRequests}</span>}
++          </button>
+         </nav>
+ 
+         <div className="sidebar-foot">
+@@ -75,3 +82,13 @@ function WheelIcon() {
+     </svg>
+   );
+ }
++
++function ParentIcon() {
++  return (
++    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
++      <circle cx="9" cy="8" r="3.2" />
++      <path d="M3.5 20v-1.4A4.6 4.6 0 018 14h2a4.6 4.6 0 014.5 4.6V20" />
++      <path d="M16.5 11.5a2.4 2.4 0 100-4.8 2.4 2.4 0 000 4.8M20.5 20v-1.2a3.6 3.6 0 00-3-3.5" />
++    </svg>
++  );
++}
+diff --git a/src/components/ParentFormModal.jsx b/src/components/ParentFormModal.jsx
+new file mode 100644
+index 0000000..b1985a2
+--- /dev/null
++++ b/src/components/ParentFormModal.jsx
+@@ -0,0 +1,182 @@
++import { useState } from 'react';
++import Modal from './Modal';
++import ConfirmDialog from './ConfirmDialog';
++import { parentAction, localDigits } from '../lib/parents';
++
++// Create or edit a parent, including which children they can track.
++export default function ParentFormModal({ parent, students, onClose, onSaved, onRemoved }) {
++  const isEdit = Boolean(parent);
++  const [fullName, setFullName] = useState(parent?.full_name || '');
++  const [phone, setPhone] = useState(localDigits(parent?.phone));
++  const [email, setEmail] = useState(parent?.email || '');
++  const [studentIds, setStudentIds] = useState(parent?.student_ids || []);
++  const [saving, setSaving] = useState(false);
++  const [error, setError] = useState(null);
++  const [confirm, setConfirm] = useState(null);
++
++  const phoneOk = /^[6-9]\d{9}$/.test(phone.replace(/\D/g, ''));
++
++  function toggleStudent(id) {
++    setStudentIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
++  }
++
++  async function handleSubmit(e) {
++    e.preventDefault();
++    if (!phoneOk) { setError('Enter a valid 10-digit mobile number.'); return; }
++    setSaving(true);
++    setError(null);
++    try {
++      if (isEdit) {
++        await parentAction('update', {
++          id: parent.id, full_name: fullName, phone, student_ids: studentIds,
++        });
++        onSaved();
++      } else {
++        const res = await parentAction('create', {
++          full_name: fullName, phone, student_ids: studentIds,
++          ...(email.trim() ? { email: email.trim() } : {}),
++        });
++        onSaved(res.parent, res.password);
++      }
++    } catch (ex) {
++      setError(ex.message);
++      setSaving(false);
++    }
++  }
++
++  async function runConfirmed() {
++    const action = confirm;
++    setConfirm(null);
++    setSaving(true);
++    setError(null);
++    try {
++      if (action === 'reset') {
++        const res = await parentAction('reset_password', { id: parent.id });
++        onSaved({ ...parent, ...res.parent }, res.password, true);
++      } else if (action === 'remove') {
++        await parentAction('remove', { id: parent.id });
++        onRemoved();
++      } else {
++        await parentAction('set_active', { id: parent.id, active: action === 'activate' });
++        onSaved();
++      }
++    } catch (ex) {
++      setError(ex.message);
++      setSaving(false);
++    }
++  }
++
++  if (confirm) {
++    const copy = {
++      reset: {
++        title: 'Reset password',
++        message: `Create a new password for ${parent.full_name}? Their old one stops working immediately.`,
++        label: 'Reset password', tone: 'default',
++      },
++      deactivate: {
++        title: 'Deactivate account',
++        message: `${parent.full_name} won't be able to sign in to the parent app. You can turn it back on any time.`,
++        label: 'Deactivate', tone: 'danger',
++      },
++      activate: {
++        title: 'Activate account',
++        message: `Let ${parent.full_name} sign in again with their existing password?`,
++        label: 'Activate', tone: 'default',
++      },
++      remove: {
++        title: 'Remove parent',
++        message: `Delete ${parent.full_name}, their login and their child links? This can't be undone.`,
++        label: 'Remove', tone: 'danger',
++      },
++    }[confirm];
++    return (
++      <ConfirmDialog title={copy.title} message={copy.message} confirmLabel={copy.label}
++        tone={copy.tone} onConfirm={runConfirmed} onCancel={() => setConfirm(null)} />
++    );
++  }
++
++  return (
++    <Modal title={isEdit ? `Edit ${parent.full_name}` : 'Add parent'} onClose={onClose} width={520}>
++      <form onSubmit={handleSubmit}>
++        {error && <div className="form-error">{error}</div>}
++
++        <div className="form-field">
++          <label htmlFor="parent_name">Parent name</label>
++          <input id="parent_name" value={fullName} onChange={(e) => setFullName(e.target.value)} required autoComplete="off" />
++        </div>
++
++        <div className="form-field">
++          <label htmlFor="parent_phone">Mobile number</label>
++          <div className="phone-input">
++            <span className="phone-prefix">+91</span>
++            <input id="parent_phone" value={phone} onChange={(e) => setPhone(e.target.value)} required
++              inputMode="tel" autoComplete="off" placeholder="10-digit number" />
++          </div>
++        </div>
++
++        {!isEdit && (
++          <div className="form-field">
++            <label htmlFor="parent_email">Email for sign-in (optional)</label>
++            <input id="parent_email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
++              autoComplete="off" placeholder="Leave blank to use their phone number" />
++            <p className="muted form-hint">
++              If left blank, the parent signs in with their mobile number instead.
++            </p>
++          </div>
++        )}
++
++        <div className="form-field">
++          <span className="field-label">Children they can track</span>
++          {students.length === 0 ? (
++            <p className="muted form-hint">Add students first, then link them here.</p>
++          ) : (
++            <div className="child-picker">
++              {students.map((s) => (
++                <label key={s.id} className={`child-option ${studentIds.includes(s.id) ? 'is-on' : ''}`}>
++                  <input type="checkbox" checked={studentIds.includes(s.id)} onChange={() => toggleStudent(s.id)} />
++                  <span className="child-option-name">{s.full_name}</span>
++                  <span className="muted child-option-adm">{s.admission_number}</span>
++                </label>
++              ))}
++            </div>
++          )}
++          {studentIds.length === 0 && (
++            <p className="muted form-hint">
++              Without a child linked, the parent app will show nothing to track.
++            </p>
++          )}
++        </div>
++
++        {isEdit && (
++          <div className="account-box">
++            <div className="account-box-head">
++              <span>Login</span>
++              <span className={`status-dot ${parent.is_active ? 'is-on' : ''}`}>
++                {parent.is_active ? 'Active' : 'Deactivated'}
++              </span>
++            </div>
++            <div className="account-box-actions">
++              <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => setConfirm('reset')}>
++                Reset password
++              </button>
++              <button type="button" className="btn btn-secondary btn-sm" disabled={saving}
++                onClick={() => setConfirm(parent.is_active ? 'deactivate' : 'activate')}>
++                {parent.is_active ? 'Deactivate' : 'Activate'}
++              </button>
++              <button type="button" className="btn btn-danger btn-sm" disabled={saving} onClick={() => setConfirm('remove')}>
++                Remove
++              </button>
++            </div>
++          </div>
++        )}
++
++        <div className="form-actions">
++          <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
++          <button type="submit" className="btn btn-primary" disabled={saving}>
++            {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add parent'}
++          </button>
++        </div>
++      </form>
++    </Modal>
++  );
++}
+diff --git a/src/components/StaffFormModal.jsx b/src/components/StaffFormModal.jsx
+index 6ebf770..de44a50 100644
+--- a/src/components/StaffFormModal.jsx
++++ b/src/components/StaffFormModal.jsx
+@@ -7,7 +7,7 @@ import { staffAction, normalizePhone, localDigits, ROLE_LABEL } from '../lib/sta
+ // onSaved(staffRow, password?) — password is set when a login was created or reset.
+ export default function StaffFormModal({ staff, buses, crewByBus, onClose, onSaved, onRemoved }) {
+   const isEdit = Boolean(staff);
+-  const [fullName, setFullName] = useState(staff?.full_name || '');
++  const [fullName, setFullName] = useState(staff?.name_missing ? '' : (staff?.full_name || ''));
+   const [phone, setPhone] = useState(localDigits(staff?.phone));
+   const [role, setRole] = useState(staff?.role || 'driver');
+   const [busId, setBusId] = useState(staff?.bus_id || '');
+diff --git a/src/lib/parents.js b/src/lib/parents.js
+new file mode 100644
+index 0000000..505ea2a
+--- /dev/null
++++ b/src/lib/parents.js
+@@ -0,0 +1,43 @@
++import { supabase } from './supabase';
++
++// All parent writes go through the manage-parents Edge Function, because
++// creating logins and resetting passwords needs the Supabase admin key.
++export async function parentAction(action, payload = {}) {
++  const { data, error } = await supabase.functions.invoke('manage-parents', {
++    body: { action, ...payload },
++  });
++  if (error) {
++    let message = error.message;
++    try {
++      const body = await error.context?.json?.();
++      if (body?.error) message = body.error;
++    } catch { /* not JSON */ }
++    if (/Failed to send a request|fetch/i.test(message)) {
++      message = 'Could not reach the server. Check your internet connection and try again.';
++    }
++    throw new Error(message);
++  }
++  return data;
++}
++
++export function formatPhone(phone) {
++  const d = String(phone || '').replace(/\D/g, '');
++  if (d.length === 12 && d.startsWith('91')) return `+91 ${d.slice(2, 7)} ${d.slice(7)}`;
++  if (d.length === 10) return `+91 ${d.slice(0, 5)} ${d.slice(5)}`;
++  return phone || '';
++}
++
++export function localDigits(phone) {
++  const d = String(phone || '').replace(/\D/g, '');
++  return d.length === 12 && d.startsWith('91') ? d.slice(2) : d;
++}
++
++export function timeAgo(iso) {
++  const t = new Date(iso);
++  const mins = Math.round((Date.now() - t.getTime()) / 60000);
++  if (mins < 1) return 'just now';
++  if (mins < 60) return `${mins} min ago`;
++  const hrs = Math.round(mins / 60);
++  if (hrs < 24) return `${hrs} h ago`;
++  return `${Math.round(hrs / 24)} d ago`;
++}
+diff --git a/src/lib/staff.js b/src/lib/staff.js
+index 2597d6a..9c9fa1d 100644
+--- a/src/lib/staff.js
++++ b/src/lib/staff.js
+@@ -20,7 +20,7 @@ export async function staffAction(action, payload = {}) {
+   return data;
+ }
+ 
+-export const ROLE_LABEL = { driver: 'Driver', conductor: 'Conductor' };
++export const ROLE_LABEL = { driver: 'Driver', conductor: 'Conductor', parent: 'Parent' };
+ 
+ // Same rules as the Edge Function, for instant feedback in the form.
+ export function normalizePhone(input) {
+diff --git a/src/pages/ParentsPage.css b/src/pages/ParentsPage.css
+new file mode 100644
+index 0000000..7df58d4
+--- /dev/null
++++ b/src/pages/ParentsPage.css
+@@ -0,0 +1,62 @@
++.request-panel { padding: 1rem 1.2rem; margin-bottom: 1.4rem; border-left: 3px solid var(--signal); }
++.request-panel-head { display: flex; align-items: flex-start; gap: 0.8rem; margin-bottom: 0.9rem; }
++.request-panel-head h2 { font-size: 1.02rem; margin-bottom: 0.15rem; }
++.request-panel-head p { font-size: 0.85rem; }
++.request-badge {
++  display: grid; place-items: center; flex-shrink: 0;
++  min-width: 26px; height: 26px; padding: 0 0.4rem;
++  border-radius: 999px; background: var(--signal); color: var(--ink);
++  font-size: 0.85rem; font-weight: 700;
++}
++.request-row {
++  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
++  padding: 0.7rem 0; border-top: 1px solid var(--line);
++}
++.request-main { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
++.request-name { font-weight: 600; font-size: 0.92rem; }
++.request-meta { font-size: 0.82rem; }
++.request-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
++
++.parent-row { grid-template-columns: 1.6fr 1.2fr 1.6fr 0.9fr auto; }
++.parent-children { display: flex; flex-wrap: wrap; gap: 0.3rem; }
++
++.child-picker {
++  display: flex; flex-direction: column;
++  border: 1px solid var(--line); border-radius: var(--radius-sm);
++  max-height: 210px; overflow-y: auto;
++}
++.child-option {
++  display: flex; align-items: center; gap: 0.6rem;
++  padding: 0.55rem 0.75rem; cursor: pointer; font-size: 0.9rem;
++  border-bottom: 1px solid var(--line);
++}
++.child-option:last-child { border-bottom: none; }
++.child-option:hover { background: var(--paper); }
++.child-option.is-on { background: #eaf1fe; }
++.child-option input { width: auto; margin: 0; }
++.child-option-name { font-weight: 550; }
++.child-option-adm { font-size: 0.82rem; margin-left: auto; }
++
++@media (max-width: 720px) {
++  .request-row { flex-direction: column; align-items: stretch; gap: 0.6rem; }
++  .request-actions .btn { flex: 1; }
++  .parent-row {
++    grid-template-columns: 1fr auto;
++    grid-template-areas:
++      "name    actions"
++      "phone   actions"
++      "kids    kids"
++      "status  status";
++    gap: 0.3rem 0.75rem;
++  }
++  .parent-row > :nth-child(1) { grid-area: name; }
++  .parent-row > :nth-child(2) { grid-area: phone; padding-left: calc(34px + 0.7rem); }
++  .parent-row > :nth-child(3) {
++    grid-area: kids; justify-self: stretch;
++    padding-left: calc(34px + 0.7rem);
++    flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px;
++  }
++  .parent-row > :nth-child(4) { grid-area: status; padding-left: calc(34px + 0.7rem); }
++  .parent-row > :nth-child(5) { grid-area: actions; align-self: start; }
++  .parent-children .bus-tag { white-space: nowrap; }
++}
+diff --git a/src/pages/ParentsPage.jsx b/src/pages/ParentsPage.jsx
+new file mode 100644
+index 0000000..ede8ef3
+--- /dev/null
++++ b/src/pages/ParentsPage.jsx
+@@ -0,0 +1,217 @@
++import { useCallback, useEffect, useMemo, useState } from 'react';
++import { supabase } from '../lib/supabase';
++import { useAuth } from '../lib/AuthContext';
++import { parentAction, formatPhone, timeAgo } from '../lib/parents';
++import ParentFormModal from '../components/ParentFormModal';
++import CredentialsModal from '../components/CredentialsModal';
++import './StudentsPage.css';
++import './StaffPage.css';
++import './ParentsPage.css';
++
++export default function ParentsPage() {
++  const { managementUser } = useAuth();
++  const schoolId = managementUser?.school_id;
++
++  const [parents, setParents] = useState([]);
++  const [students, setStudents] = useState([]);
++  const [requests, setRequests] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState(null);
++  const [query, setQuery] = useState('');
++
++  const [adding, setAdding] = useState(false);
++  const [editing, setEditing] = useState(null);
++  const [credentials, setCredentials] = useState(null);
++  const [busyRequest, setBusyRequest] = useState(null);
++
++  const load = useCallback(async () => {
++    if (!schoolId) return;
++    setLoading(true);
++    setError(null);
++    try {
++      const [{ parents: list }, studentsRes, requestsRes] = await Promise.all([
++        parentAction('list'),
++        supabase.from('students').select('id, full_name, admission_number')
++          .eq('school_id', schoolId).order('full_name'),
++        supabase.from('password_reset_requests')
++          .select('id, identifier, contact_phone, parent_user_id, created_at')
++          .eq('status', 'pending').order('created_at', { ascending: false }),
++      ]);
++      setParents(list || []);
++      setStudents(studentsRes.data || []);
++      setRequests(requestsRes.data || []);
++    } catch (ex) {
++      setError(ex.message);
++    }
++    setLoading(false);
++  }, [schoolId]);
++
++  useEffect(() => { load(); }, [load]);
++
++  const parentById = useMemo(
++    () => Object.fromEntries(parents.map((p) => [p.id, p])), [parents]);
++  const studentName = useMemo(
++    () => Object.fromEntries(students.map((s) => [s.id, s.full_name])), [students]);
++
++  const filtered = useMemo(() => {
++    const q = query.trim().toLowerCase();
++    const digits = q.replace(/\D/g, '');
++    return parents.filter((p) =>
++      !q ||
++      (p.full_name || '').toLowerCase().includes(q) ||
++      (p.email || '').toLowerCase().includes(q) ||
++      (digits && String(p.phone || '').includes(digits)));
++  }, [parents, query]);
++
++  function handleSaved(parent, password, isReset = false) {
++    setAdding(false);
++    setEditing(null);
++    if (password && parent) setCredentials({ staff: { ...parent, role: 'parent' }, password, isReset });
++    load();
++  }
++
++  // Reset straight from a request, so the school doesn't have to find the
++  // parent in the list first.
++  async function resetFromRequest(request) {
++    const parent = parentById[request.parent_user_id];
++    if (!parent) return;
++    setBusyRequest(request.id);
++    setError(null);
++    try {
++      const res = await parentAction('reset_password', { id: parent.id });
++      setCredentials({
++        staff: { ...parent, role: 'parent', phone: request.contact_phone || parent.phone },
++        password: res.password,
++        isReset: true,
++      });
++      load();
++    } catch (ex) {
++      setError(ex.message);
++    }
++    setBusyRequest(null);
++  }
++
++  async function dismissRequest(id) {
++    setBusyRequest(id);
++    try {
++      await parentAction('dismiss_request', { id });
++      load();
++    } catch (ex) {
++      setError(ex.message);
++    }
++    setBusyRequest(null);
++  }
++
++  return (
++    <div>
++      <header className="page-head staff-head">
++        <div>
++          <h1>Parents</h1>
++          <p className="muted">{parents.length} parent{parents.length === 1 ? '' : 's'} with app access</p>
++        </div>
++        <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add parent</button>
++      </header>
++
++      {error && <div className="page-error">{error}</div>}
++
++      {requests.length > 0 && (
++        <section className="request-panel card">
++          <div className="request-panel-head">
++            <span className="request-badge">{requests.length}</span>
++            <div>
++              <h2>Password requests</h2>
++              <p className="muted">
++                These parents asked for a new password from the app. Reset it, then send it on WhatsApp.
++              </p>
++            </div>
++          </div>
++          {requests.map((r) => {
++            const parent = parentById[r.parent_user_id];
++            return (
++              <div className="request-row" key={r.id}>
++                <div className="request-main">
++                  <span className="request-name">{parent?.full_name || r.identifier}</span>
++                  <span className="muted request-meta">
++                    {formatPhone(r.contact_phone)} · asked {timeAgo(r.created_at)}
++                  </span>
++                </div>
++                <div className="request-actions">
++                  <button className="btn btn-secondary btn-sm" disabled={busyRequest === r.id}
++                    onClick={() => dismissRequest(r.id)}>
++                    Dismiss
++                  </button>
++                  <button className="btn btn-primary btn-sm" disabled={busyRequest === r.id || !parent}
++                    onClick={() => resetFromRequest(r)}>
++                    {busyRequest === r.id ? 'Working…' : 'Reset password'}
++                  </button>
++                </div>
++              </div>
++            );
++          })}
++        </section>
++      )}
++
++      <div className="staff-toolbar">
++        <input type="text" placeholder="Search by name, phone or email…"
++          value={query} onChange={(e) => setQuery(e.target.value)} />
++      </div>
++
++      {loading ? (
++        <div className="muted loading-row">Loading…</div>
++      ) : parents.length === 0 ? (
++        <div className="empty-state card">
++          <h3>No parents yet</h3>
++          <p className="muted">Add a parent, link their children, and share the login they'll use in the app.</p>
++          <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add parent</button>
++        </div>
++      ) : filtered.length === 0 ? (
++        <div className="empty-state card"><h3>No one matches</h3></div>
++      ) : (
++        <div className="staff-table card">
++          <div className="staff-row parent-row staff-row-head">
++            <span>Parent</span><span>Phone</span><span>Children</span><span>Status</span><span></span>
++          </div>
++          {filtered.map((p) => (
++            <div className={`staff-row parent-row ${p.is_active ? '' : 'is-inactive'}`} key={p.id}>
++              <span className="staff-name-cell">
++                <span className="roster-avatar">
++                  <span className="roster-avatar-initial">{(p.full_name?.[0] || '?').toUpperCase()}</span>
++                </span>
++                <span className="staff-name-text">
++                  <span className="roster-name">{p.full_name}</span>
++                </span>
++              </span>
++              <a className="staff-phone" href={`tel:${p.phone}`}>{formatPhone(p.phone)}</a>
++              <span className="parent-children">
++                {p.student_ids.length === 0
++                  ? <span className="bus-tag bus-tag-free">No child linked</span>
++                  : p.student_ids.map((id) => (
++                      <span className="bus-tag" key={id}>{studentName[id] || 'Removed'}</span>
++                    ))}
++              </span>
++              <span className={`status-dot ${p.is_active ? 'is-on' : ''}`}>
++                {p.is_active ? 'Active' : 'Deactivated'}
++              </span>
++              <span className="students-row-actions">
++                <button className="btn btn-secondary btn-sm" onClick={() => setEditing(p)}>Manage</button>
++              </span>
++            </div>
++          ))}
++        </div>
++      )}
++
++      {(adding || editing) && (
++        <ParentFormModal
++          parent={editing}
++          students={students}
++          onClose={() => { setAdding(false); setEditing(null); }}
++          onSaved={handleSaved}
++          onRemoved={() => { setEditing(null); load(); }}
++        />
++      )}
++      {credentials && (
++        <CredentialsModal {...credentials} onClose={() => setCredentials(null)} />
++      )}
++    </div>
++  );
++}
+diff --git a/src/pages/StaffPage.jsx b/src/pages/StaffPage.jsx
+index 2b64bcb..c3f6bdf 100644
+--- a/src/pages/StaffPage.jsx
++++ b/src/pages/StaffPage.jsx
+@@ -38,7 +38,14 @@ export default function StaffPage() {
+       supabase.from('buses').select('id, bus_number').eq('school_id', schoolId).eq('is_active', true).order('bus_number'),
+     ]);
+     if (e1 || e2) { setError((e1 || e2).message); setLoading(false); return; }
+-    setStaff(s || []);
++    // Older rows (created before this page existed) may have no name/role yet.
++    setStaff((s || []).map((row) => ({
++      ...row,
++      name_missing: !(row.full_name || '').trim(),
++      full_name: (row.full_name || '').trim() || 'Name not set',
++      role: row.role === 'conductor' ? 'conductor' : 'driver',
++      is_active: row.is_active !== false,
++    })));
+     setBuses(b || []);
+     setLoading(false);
+   }, [schoolId]);
+@@ -60,7 +67,7 @@ export default function StaffPage() {
+     const qDigits = q.replace(/\D/g, '');
+     return staff.filter((s) =>
+       (filter === 'all' || s.role === filter) &&
+-      (!q || s.full_name.toLowerCase().includes(q) || (qDigits && String(s.phone || '').includes(qDigits))));
++      (!q || String(s.full_name || '').toLowerCase().includes(q) || (qDigits && String(s.phone || '').includes(qDigits))));
+   }, [staff, filter, query]);
+ 
+   function handleSaved(row, password, isReset = false) {
+diff --git a/supabase/functions/manage-parents/index.ts b/supabase/functions/manage-parents/index.ts
+new file mode 100644
+index 0000000..3fb39b6
+--- /dev/null
++++ b/supabase/functions/manage-parents/index.ts
+@@ -0,0 +1,288 @@
++// manage-parents — parent accounts, child links, and password resets.
++//
++// Called by the management dashboard with the manager's own session token.
++// Every action checks that the caller is a management user and that the parent,
++// student and bus belong to that same school.
++//
++// Parents sign in with email + password (the parent app's login screen). When
++// a school adds a parent with only a phone number, we create an internal login
++// email from it, the same scheme the driver app uses:
++//   +91 99474 96965  ->  919947496965@parent.evide.in
++//
++// Deploy:  supabase functions deploy manage-parents
++
++import { createClient } from 'npm:@supabase/supabase-js@2';
++
++const LOGIN_EMAIL_DOMAIN = 'parent.evide.in';
++
++const corsHeaders = {
++  'Access-Control-Allow-Origin': '*',
++  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
++  'Access-Control-Allow-Methods': 'POST, OPTIONS',
++};
++
++const admin = createClient(
++  Deno.env.get('SUPABASE_URL')!,
++  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
++  { auth: { persistSession: false, autoRefreshToken: false } },
++);
++
++class HttpError extends Error {
++  status: number;
++  constructor(status: number, message: string) { super(message); this.status = status; }
++}
++
++function json(body: unknown, status = 200) {
++  return new Response(JSON.stringify(body), {
++    status,
++    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
++  });
++}
++
++function normalizePhone(input: unknown): string | null {
++  let d = String(input ?? '').replace(/\D/g, '');
++  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
++  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
++  if (!/^[6-9]\d{9}$/.test(d)) return null;
++  return `+91${d}`;
++}
++
++function loginEmail(phone: string) {
++  return `${phone.replace(/\D/g, '')}@${LOGIN_EMAIL_DOMAIN}`;
++}
++
++// Easy to read aloud and type on a phone: 4 letters + 4 digits, no look-alikes.
++function generatePassword() {
++  const letters = 'abcdefghjkmnpqrstuvwxyz';
++  const bytes = crypto.getRandomValues(new Uint8Array(8));
++  let out = '';
++  for (let i = 0; i < 4; i++) out += letters[bytes[i] % letters.length];
++  for (let i = 4; i < 8; i++) out += String(bytes[i] % 10);
++  return out;
++}
++
++function checkPassword(pw: unknown): string {
++  const p = String(pw ?? '');
++  if (p.length < 8) throw new HttpError(400, 'Password must be at least 8 characters.');
++  if (p.length > 72) throw new HttpError(400, 'Password is too long.');
++  return p;
++}
++
++function cleanName(v: unknown): string {
++  const name = String(v ?? '').trim().replace(/\s+/g, ' ');
++  if (!name) throw new HttpError(400, 'Name is required.');
++  if (name.length > 120) throw new HttpError(400, 'Name is too long.');
++  return name;
++}
++
++async function callerSchoolId(req: Request): Promise<string> {
++  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
++  if (!token) throw new HttpError(401, 'Not signed in.');
++  const { data: { user }, error } = await admin.auth.getUser(token);
++  if (error || !user) throw new HttpError(401, 'Your session has expired. Sign in again.');
++
++  const { data: mu, error: muErr } = await admin
++    .from('management_users').select('school_id').eq('auth_user_id', user.id).maybeSingle();
++  if (muErr) throw new HttpError(500, muErr.message);
++  if (!mu?.school_id) throw new HttpError(403, 'Only school management can manage parents.');
++  return mu.school_id;
++}
++
++async function loadParent(id: unknown, schoolId: string) {
++  const { data, error } = await admin
++    .from('parent_users').select('id, auth_user_id, school_id, full_name, phone')
++    .eq('id', id).maybeSingle();
++  if (error) throw new HttpError(500, error.message);
++  if (!data || data.school_id !== schoolId) throw new HttpError(404, 'Parent not found.');
++  return data;
++}
++
++async function assertStudentsInSchool(studentIds: string[], schoolId: string) {
++  if (studentIds.length === 0) return;
++  const { data, error } = await admin
++    .from('students').select('id').eq('school_id', schoolId).in('id', studentIds);
++  if (error) throw new HttpError(500, error.message);
++  if ((data || []).length !== studentIds.length) {
++    throw new HttpError(400, 'One of those students is not in your school.');
++  }
++}
++
++// Parents are listed here rather than straight from the browser, because their
++// login email lives in auth.users, which the dashboard can't read.
++async function listParents(schoolId: string) {
++  const { data: parents, error } = await admin
++    .from('parent_users').select('id, auth_user_id, full_name, phone, created_at')
++    .eq('school_id', schoolId).order('full_name');
++  if (error) throw new HttpError(500, error.message);
++
++  const ids = (parents || []).map((p) => p.id);
++  let links: { parent_user_id: string; student_id: string }[] = [];
++  if (ids.length > 0) {
++    const { data } = await admin
++      .from('parent_student_links').select('parent_user_id, student_id').in('parent_user_id', ids);
++    links = data || [];
++  }
++
++  // Login email + disabled state, one lookup per parent.
++  const withLogin = await Promise.all((parents || []).map(async (p) => {
++    let email: string | null = null;
++    let disabled = false;
++    if (p.auth_user_id) {
++      const { data } = await admin.auth.admin.getUserById(p.auth_user_id);
++      email = data?.user?.email ?? null;
++      const until = (data?.user as { banned_until?: string } | undefined)?.banned_until;
++      disabled = Boolean(until && new Date(until) > new Date());
++    }
++    return {
++      ...p,
++      email,
++      is_active: !disabled,
++      student_ids: links.filter((l) => l.parent_user_id === p.id).map((l) => l.student_id),
++    };
++  }));
++
++  return { parents: withLogin };
++}
++
++async function createParent(body: any, schoolId: string) {
++  const full_name = cleanName(body.full_name);
++  const phone = normalizePhone(body.phone);
++  if (!phone) throw new HttpError(400, 'Enter a valid 10-digit Indian mobile number.');
++  const studentIds: string[] = Array.isArray(body.student_ids) ? body.student_ids : [];
++  await assertStudentsInSchool(studentIds, schoolId);
++
++  const email = String(body.email || '').trim() || loginEmail(phone);
++  const password = body.password ? checkPassword(body.password) : generatePassword();
++
++  const { data: created, error: authErr } = await admin.auth.admin.createUser({
++    email,
++    password,
++    email_confirm: true,
++    user_metadata: { account_type: 'parent', full_name, phone },
++  });
++  if (authErr || !created?.user) {
++    const msg = authErr?.message || 'Could not create the login.';
++    if (/already.*registered|already exists/i.test(msg)) {
++      throw new HttpError(409, 'A login already exists for that email or phone number.');
++    }
++    throw new HttpError(500, msg);
++  }
++
++  const { data: row, error: insErr } = await admin.from('parent_users').insert({
++    auth_user_id: created.user.id,
++    school_id: schoolId,
++    full_name,
++    phone,
++  }).select('id, full_name, phone').single();
++
++  if (insErr) {
++    await admin.auth.admin.deleteUser(created.user.id); // roll back the login
++    throw new HttpError(500, insErr.message);
++  }
++
++  if (studentIds.length > 0) {
++    await admin.from('parent_student_links')
++      .insert(studentIds.map((student_id) => ({ parent_user_id: row.id, student_id })));
++  }
++
++  return { parent: { ...row, email }, password };
++}
++
++async function updateParent(body: any, schoolId: string) {
++  const current = await loadParent(body.id, schoolId);
++  const patch: Record<string, unknown> = {};
++  if ('full_name' in body) patch.full_name = cleanName(body.full_name);
++  if ('phone' in body) {
++    const phone = normalizePhone(body.phone);
++    if (!phone) throw new HttpError(400, 'Enter a valid 10-digit Indian mobile number.');
++    patch.phone = phone;
++  }
++  if (Object.keys(patch).length > 0) {
++    const { error } = await admin.from('parent_users').update(patch).eq('id', current.id);
++    if (error) throw new HttpError(500, error.message);
++  }
++
++  // Children: replace the whole set when provided.
++  if (Array.isArray(body.student_ids)) {
++    await assertStudentsInSchool(body.student_ids, schoolId);
++    await admin.from('parent_student_links').delete().eq('parent_user_id', current.id);
++    if (body.student_ids.length > 0) {
++      const { error } = await admin.from('parent_student_links')
++        .insert(body.student_ids.map((student_id: string) => ({ parent_user_id: current.id, student_id })));
++      if (error) throw new HttpError(500, error.message);
++    }
++  }
++  return { ok: true };
++}
++
++async function resetParentPassword(body: any, schoolId: string) {
++  const current = await loadParent(body.id, schoolId);
++  if (!current.auth_user_id) throw new HttpError(400, 'This parent has no login yet.');
++  const password = body.password ? checkPassword(body.password) : generatePassword();
++  const { error } = await admin.auth.admin.updateUserById(current.auth_user_id, { password });
++  if (error) throw new HttpError(500, error.message);
++
++  // Close any open reset requests for this parent.
++  await admin.from('password_reset_requests')
++    .update({ status: 'done', resolved_at: new Date().toISOString() })
++    .eq('parent_user_id', current.id).eq('status', 'pending');
++
++  return { password, parent: current };
++}
++
++async function setParentActive(body: any, schoolId: string) {
++  const current = await loadParent(body.id, schoolId);
++  const active = Boolean(body.active);
++  if (current.auth_user_id) {
++    const { error } = await admin.auth.admin.updateUserById(current.auth_user_id, {
++      ban_duration: active ? 'none' : '876000h',
++    });
++    if (error) throw new HttpError(500, error.message);
++  }
++  return { ok: true };
++}
++
++async function removeParent(body: any, schoolId: string) {
++  const current = await loadParent(body.id, schoolId);
++  await admin.from('parent_student_links').delete().eq('parent_user_id', current.id);
++  const { error } = await admin.from('parent_users').delete().eq('id', current.id);
++  if (error) throw new HttpError(500, error.message);
++  if (current.auth_user_id) await admin.auth.admin.deleteUser(current.auth_user_id);
++  return { ok: true };
++}
++
++async function dismissRequest(body: any, schoolId: string) {
++  const { data, error } = await admin
++    .from('password_reset_requests').select('id, school_id').eq('id', body.id).maybeSingle();
++  if (error) throw new HttpError(500, error.message);
++  if (!data || data.school_id !== schoolId) throw new HttpError(404, 'Request not found.');
++  const { error: updErr } = await admin.from('password_reset_requests')
++    .update({ status: 'dismissed', resolved_at: new Date().toISOString() }).eq('id', body.id);
++  if (updErr) throw new HttpError(500, updErr.message);
++  return { ok: true };
++}
++
++Deno.serve(async (req) => {
++  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
++  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
++
++  try {
++    const schoolId = await callerSchoolId(req);
++    const body = await req.json().catch(() => ({}));
++    switch (body.action) {
++      case 'list': return json(await listParents(schoolId));
++      case 'create': return json(await createParent(body, schoolId));
++      case 'update': return json(await updateParent(body, schoolId));
++      case 'reset_password': return json(await resetParentPassword(body, schoolId));
++      case 'set_active': return json(await setParentActive(body, schoolId));
++      case 'remove': return json(await removeParent(body, schoolId));
++      case 'dismiss_request': return json(await dismissRequest(body, schoolId));
++      default: throw new HttpError(400, 'Unknown action.');
++    }
++  } catch (e) {
++    const status = e instanceof HttpError ? e.status : 500;
++    const message = e instanceof Error ? e.message : 'Something went wrong.';
++    if (status >= 500) console.error(e);
++    return json({ error: message }, status);
++  }
++});
+diff --git a/supabase/functions/parent-login/index.ts b/supabase/functions/parent-login/index.ts
+new file mode 100644
+index 0000000..47f4404
+--- /dev/null
++++ b/supabase/functions/parent-login/index.ts
+@@ -0,0 +1,101 @@
++// parent-login — lets a parent sign in with their mobile number.
++//
++// Parents choose phone or email on the login screen. Email goes straight to
++// Supabase from the app. Phone comes here, because the number has to be
++// matched to an account, and doing that lookup in the app would let anyone
++// type numbers to discover which parents are registered and under which email.
++//
++// This function never reveals whether a number exists: a wrong number and a
++// wrong password return the same message.
++//
++// Deploy (no session exists yet, so JWT verification must be off):
++//   supabase functions deploy parent-login --no-verify-jwt
++
++import { createClient } from 'npm:@supabase/supabase-js@2';
++
++const corsHeaders = {
++  'Access-Control-Allow-Origin': '*',
++  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
++  'Access-Control-Allow-Methods': 'POST, OPTIONS',
++};
++
++const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
++
++// Admin client: used only to look up which account owns the phone number.
++const admin = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
++  auth: { persistSession: false, autoRefreshToken: false },
++});
++
++function json(body: unknown, status = 200) {
++  return new Response(JSON.stringify(body), {
++    status,
++    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
++  });
++}
++
++function normalizePhone(input: unknown): string | null {
++  let d = String(input ?? '').replace(/\D/g, '');
++  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
++  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
++  if (!/^[6-9]\d{9}$/.test(d)) return null;
++  return `+91${d}`;
++}
++
++// Same message whatever goes wrong, so the response can't be used to tell
++// "no such number" from "wrong password".
++const GENERIC = 'Mobile number or password is incorrect.';
++
++Deno.serve(async (req) => {
++  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
++  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
++
++  try {
++    const body = await req.json().catch(() => ({}));
++    const phone = normalizePhone(body.phone);
++    const password = String(body.password ?? '');
++    if (!phone || password.length === 0) return json({ error: GENERIC }, 401);
++
++    // Which parent owns this number?
++    const { data: parent, error: parentErr } = await admin
++      .from('parent_users')
++      .select('auth_user_id')
++      .eq('phone', phone)
++      .maybeSingle();
++    if (parentErr) {
++      console.error(parentErr);
++      return json({ error: 'Something went wrong. Try again.' }, 500);
++    }
++    if (!parent?.auth_user_id) return json({ error: GENERIC }, 401);
++
++    // Their sign-in email (either a real one or the internal phone-based one).
++    const { data: userRes } = await admin.auth.admin.getUserById(parent.auth_user_id);
++    const email = userRes?.user?.email;
++    if (!email) return json({ error: GENERIC }, 401);
++
++    // Sign in as the parent would from the app. Uses the public anon key, so
++    // Supabase's own auth rate limits and lockouts still apply.
++    const anon = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, {
++      auth: { persistSession: false, autoRefreshToken: false },
++    });
++    const { data: signIn, error: signInErr } =
++      await anon.auth.signInWithPassword({ email, password });
++
++    if (signInErr || !signIn.session) {
++      const msg = signInErr?.message || '';
++      // A banned account is worth naming: the parent can't fix it themselves.
++      if (/banned|disabled/i.test(msg)) {
++        return json({ error: 'This account has been deactivated. Contact your school office.' }, 403);
++      }
++      return json({ error: GENERIC }, 401);
++    }
++
++    // The app restores the session from the refresh token.
++    return json({
++      refresh_token: signIn.session.refresh_token,
++      access_token: signIn.session.access_token,
++    });
++  } catch (e) {
++    console.error(e);
++    return json({ error: 'Something went wrong. Try again.' }, 500);
++  }
++});
+diff --git a/supabase/parents_migration.sql b/supabase/parents_migration.sql
+new file mode 100644
+index 0000000..bf44c68
+--- /dev/null
++++ b/supabase/parents_migration.sql
+@@ -0,0 +1,111 @@
++-- Parent accounts + "forgot password" requests.
++-- Safe to run more than once; it only ADDS things.
++
++-- ------------------------------------------------------- parent columns
++-- The dashboard stores a parent's name and mobile number on their row.
++-- Added only if your table doesn't have them already.
++alter table parent_users add column if not exists full_name text;
++alter table parent_users add column if not exists phone text;
++
++-- ---------------------------------------------------------------- requests
++create table if not exists password_reset_requests (
++  id uuid primary key default gen_random_uuid(),
++  -- What the parent typed (email or phone). Matched to an account server-side.
++  identifier text not null,
++  -- Where the school should send the new password.
++  contact_phone text not null,
++  -- Filled in when the identifier matches a parent; null when it doesn't.
++  parent_user_id uuid references parent_users(id) on delete cascade,
++  school_id uuid references schools(id) on delete cascade,
++  status text not null default 'pending',
++  created_at timestamptz not null default now(),
++  resolved_at timestamptz,
++  resolved_by uuid
++);
++
++do $$ begin
++  alter table password_reset_requests
++    add constraint password_reset_requests_status_check
++    check (status in ('pending', 'done', 'dismissed'));
++exception when duplicate_object then null; end $$;
++
++create index if not exists idx_reset_requests_school
++  on password_reset_requests(school_id, status, created_at desc);
++
++alter table password_reset_requests enable row level security;
++
++-- Management sees and updates only their own school's requests.
++drop policy if exists management_reads_reset_requests on password_reset_requests;
++create policy management_reads_reset_requests on password_reset_requests for select using (
++  school_id in (select school_id from management_users where auth_user_id = auth.uid()));
++
++drop policy if exists management_updates_reset_requests on password_reset_requests;
++create policy management_updates_reset_requests on password_reset_requests for update using (
++  school_id in (select school_id from management_users where auth_user_id = auth.uid()));
++
++grant select, update on password_reset_requests to authenticated;
++
++-- The parent is locked out, so this runs as an anonymous caller. It matches the
++-- identifier itself and returns nothing either way, so the app can't be used to
++-- discover which emails or numbers are registered.
++create or replace function request_password_reset(p_identifier text, p_contact_phone text)
++returns void
++language plpgsql
++security definer
++set search_path = public, auth
++as $$
++declare
++  v_digits text := regexp_replace(coalesce(p_contact_phone, ''), '\D', '', 'g');
++  v_parent record;
++  v_recent int;
++begin
++  if coalesce(trim(p_identifier), '') = '' or length(v_digits) < 10 then
++    return;
++  end if;
++
++  -- Rate limit: at most 3 pending requests per hour per contact number.
++  select count(*) into v_recent
++  from password_reset_requests
++  where contact_phone = v_digits
++    and created_at > now() - interval '1 hour';
++  if v_recent >= 3 then
++    return;
++  end if;
++
++  -- Match on the login email, the auth phone, or the stored parent phone.
++  select p.id as parent_user_id, p.school_id into v_parent
++  from parent_users p
++  join auth.users u on u.id = p.auth_user_id
++  where lower(u.email) = lower(trim(p_identifier))
++     or regexp_replace(coalesce(u.phone, ''), '\D', '', 'g') = regexp_replace(trim(p_identifier), '\D', '', 'g')
++  limit 1;
++
++  insert into password_reset_requests (identifier, contact_phone, parent_user_id, school_id)
++  values (trim(p_identifier), v_digits, v_parent.parent_user_id, v_parent.school_id);
++end;
++$$;
++
++revoke all on function request_password_reset(text, text) from public;
++grant execute on function request_password_reset(text, text) to anon, authenticated;
++
++-- ------------------------------------------------------- parent management
++-- Management can see their school's parents and links. All writes go through
++-- the manage-parents Edge Function.
++drop policy if exists management_reads_school_parents on parent_users;
++create policy management_reads_school_parents on parent_users for select using (
++  school_id in (select school_id from management_users where auth_user_id = auth.uid()));
++
++drop policy if exists management_reads_parent_links on parent_student_links;
++create policy management_reads_parent_links on parent_student_links for select using (
++  parent_user_id in (
++    select p.id from parent_users p
++    join management_users m on m.school_id = p.school_id
++    where m.auth_user_id = auth.uid()));
++
++alter table parent_users enable row level security;
++alter table parent_student_links enable row level security;
++
++notify pgrst, 'reload schema';
++
++-- Phone sign-in: the parent-signin function looks parents up by phone.
++create index if not exists idx_parent_users_phone on parent_users(phone);
+diff --git a/supabase/realtime_and_phone_login.sql b/supabase/realtime_and_phone_login.sql
+new file mode 100644
+index 0000000..3f3863d
+--- /dev/null
++++ b/supabase/realtime_and_phone_login.sql
+@@ -0,0 +1,38 @@
++-- Live bus positions over WebSocket + phone login for parents.
++-- Safe to run more than once.
++
++-- ------------------------------------------------- realtime (WebSocket) feed
++-- Supabase Realtime only streams tables that are in this publication. Without
++-- it the app's subscription connects fine but never receives a row, which
++-- looks exactly like "tracking isn't live".
++do $$ begin
++  alter publication supabase_realtime add table bus_live_position;
++exception
++  when duplicate_object then null;   -- already published
++  when undefined_object then null;   -- publication missing (self-hosted)
++end $$;
++
++-- UPDATE events carry the full new row (needed: the app reads every column).
++alter table bus_live_position replica identity full;
++
++-- Parents may read the live position of a bus one of their children rides.
++drop policy if exists parents_read_bus_live_position on bus_live_position;
++create policy parents_read_bus_live_position on bus_live_position for select using (
++  bus_id in (
++    select s.bus_id
++    from parent_student_links l
++    join parent_users p on p.id = l.parent_user_id
++    join students s on s.id = l.student_id
++    where p.auth_user_id = auth.uid()
++  ));
++
++alter table bus_live_position enable row level security;
++grant select on bus_live_position to authenticated;
++
++-- ------------------------------------------------------------- phone login
++-- Parents can sign in with either their email or their mobile number. The
++-- number is resolved to the account by the parent-login Edge Function, never
++-- in the app, so nobody can type numbers to discover which are registered.
++create index if not exists idx_parent_users_phone on parent_users(phone);
++
++notify pgrst, 'reload schema';

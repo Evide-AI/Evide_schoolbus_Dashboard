@@ -1,0 +1,46 @@
+diff a/src/App.jsx b/src/App.jsx	(rejected hunks)
+@@ -6,11 +6,32 @@ import BusList from './pages/BusList';
+ import BusDetail from './pages/BusDetail';
+ import StudentsPage from './pages/StudentsPage';
+ import StaffPage from './pages/StaffPage';
++import ParentsPage from './pages/ParentsPage';
++import ErrorBoundary from './components/ErrorBoundary';
++import { supabase } from './lib/supabase';
+ 
+ function Dashboard() {
+-  const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff'
++  const [page, setPage] = useState('fleet');   // 'fleet' | 'students' | 'staff' | 'parents'
+   const [openBusId, setOpenBusId] = useState(null);
+ 
++  // Count of parents waiting for a password reset, shown as a badge on the
++  // Parents tab so the office notices without opening the page.
++  const [pendingRequests, setPendingRequests] = useState(0);
++
++  const loadPending = useCallback(async () => {
++    const { count } = await supabase
++      .from('password_reset_requests')
++      .select('id', { count: 'exact', head: true })
++      .eq('status', 'pending');
++    setPendingRequests(count || 0);
++  }, []);
++
++  useEffect(() => {
++    loadPending();
++    const timer = setInterval(loadPending, 120000); // every 2 minutes
++    return () => clearInterval(timer);
++  }, [loadPending, page]);
++
+   function navigate(target) {
+     setOpenBusId(null); // leaving a bus detail when switching sections
+     setPage(target);
+@@ -28,8 +51,8 @@ function Dashboard() {
+   }
+ 
+   return (
+-    <Layout current={page} onNavigate={navigate}>
+-      {body}
++    <Layout current={page} onNavigate={navigate} pendingRequests={pendingRequests}>
++      <ErrorBoundary resetKey={`${page}:${openBusId || ''}`}>{body}</ErrorBoundary>
+     </Layout>
+   );
+ }

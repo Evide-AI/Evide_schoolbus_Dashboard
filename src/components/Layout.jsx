@@ -1,7 +1,7 @@
 import { useAuth } from '../lib/AuthContext';
 import './Layout.css';
 
-export default function Layout({ current, onNavigate, children }) {
+export default function Layout({ current, onNavigate, pendingRequests = 0, children }) {
   const { managementUser, signOut } = useAuth();
   const school = managementUser?.schools;
 
@@ -30,6 +30,13 @@ export default function Layout({ current, onNavigate, children }) {
             onClick={() => onNavigate('staff')}
           >
             <WheelIcon /> <span className="nav-long">Drivers &amp; conductors</span><span className="nav-short">Drivers</span>
+          </button>
+          <button
+            className={`sidebar-nav-item ${current === 'parents' ? 'active' : ''}`}
+            onClick={() => onNavigate('parents')}
+          >
+            <ParentIcon /> Parents
+            {pendingRequests > 0 && <span className="nav-badge">{pendingRequests}</span>}
           </button>
         </nav>
 
@@ -72,6 +79,16 @@ function WheelIcon() {
       <circle cx="12" cy="12" r="9" />
       <circle cx="12" cy="12" r="2.2" />
       <path d="M3.5 10.5l6.4 1M20.5 10.5l-6.4 1M12 14.2V21" />
+    </svg>
+  );
+}
+
+function ParentIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3.5 20v-1.4A4.6 4.6 0 018 14h2a4.6 4.6 0 014.5 4.6V20" />
+      <path d="M16.5 11.5a2.4 2.4 0 100-4.8 2.4 2.4 0 000 4.8M20.5 20v-1.2a3.6 3.6 0 00-3-3.5" />
     </svg>
   );
 }

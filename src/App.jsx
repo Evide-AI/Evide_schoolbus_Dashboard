@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import Login from './pages/Login';
 import Layout from './components/Layout';
@@ -22,6 +22,8 @@ function Dashboard() {
     body = <StudentsPage />;
   } else if (page === 'staff') {
     body = <StaffPage />;
+  } else if (page === 'parents') {
+    body = <ParentsPage />;
   } else if (openBusId) {
     body = <BusDetail busId={openBusId} onBack={() => setOpenBusId(null)} />;
   } else {
